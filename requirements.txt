@@ -1,0 +1,26 @@
+PyMuPDF==1.23.0
+Pillow>=10.0.0
+openai>=1.40.0
+numpy==1.24.3
+opencv-python>=4.5.0
+tqdm
+
+# 번역 라이브러리 (OpenAI API 실패 시 대안)
+deep-translator>=1.11.4
+# googletrans==4.0.0rc1  # 대안 (필요시 주석 해제)
+
+# OCR 엔진 선택 (성능 우선순위: TrOCR > PaddleOCR > Tesseract > EasyOCR)
+# 최고 정확도를 원하면 TrOCR 사용 (권장)
+# transformers>=4.20.0
+# torch>=1.12.0
+
+# 빠르고 정확한 PaddleOCR (권장)
+# paddlepaddle>=2.5.0
+# paddleocr>=2.7.0
+
+# 안정적인 Tesseract
+# pytesseract>=0.3.10
+# (Tesseract 바이너리도 별도 설치 필요: https://github.com/UB-Mannheim/tesseract/wiki)
+
+# 기본 EasyOCR (가장 쉽게 설치)
+easyocr==1.7.0
