@@ -116,7 +116,7 @@ class DeepseekOCRProcessor(ProcessorMixin):
 
     def __init__(
         self,
-        cfg=None,
+        model_path: str = None,
         tokenizer: LlamaTokenizerFast = None,
         image_size: int = 640,
         base_size: int = 1024,
@@ -137,8 +137,7 @@ class DeepseekOCRProcessor(ProcessorMixin):
         **kwargs,
     ):
         # If cfg is provided, use it to get model_path and download/load tokenizer
-        if cfg is not None:
-            model_path = cfg.model.path
+        if model_path is not None:
             # Convert relative path to absolute (relative to current working directory)
             if not os.path.isabs(model_path):
                 model_path = os.path.abspath(model_path)

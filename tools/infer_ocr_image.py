@@ -41,11 +41,10 @@ ModelRegistry.register_model("DeepseekOCRForCausalLM", DeepseekOCRForCausalLM)
 
 
 
-def build_engine(model_path: str, cfg) -> AsyncLLMEngine:
+def build_engine(cfg) -> AsyncLLMEngine:
     """Build vLLM async engine.
     
     Args:
-        model_path: Path to model directory (local) - should already have model files
         cfg: Config object
         
     Returns:
@@ -53,7 +52,7 @@ def build_engine(model_path: str, cfg) -> AsyncLLMEngine:
     """
     # Model should already be downloaded by ensure_model_downloaded()
     # Just use the local path for vLLM
-    vllm_model_path = model_path
+    vllm_model_path = cfg.model.path
     
     engine_args = AsyncEngineArgs(
         model=vllm_model_path,
@@ -76,23 +75,23 @@ def build_engine(model_path: str, cfg) -> AsyncLLMEngine:
     return engine
 
 
-def build_sampling_params() -> SamplingParams:
+def build_sampling_params(cfg) -> SamplingParams:
     """Build sampling parameters for generation.
     
     Returns:
         SamplingParams instance
     """
     logits_processors = [NoRepeatNGramLogitsProcessor(
-        ngram_size=30, 
-        window_size=90, 
-        whitelist_token_ids={128821, 128822}
+        ngram_size=cfg.logits_processors.ngram_size, 
+        window_size=cfg.logits_processors.window_size, 
+        whitelist_token_ids=cfg.logits_processors.whitelist_token_ids
     )]  # whitelist: <td>, </td> 
 
     sampling_params = SamplingParams(
-        temperature=0.0,
-        max_tokens=8192,
+        temperature=cfg.sampling_params.temperature,
+        max_tokens=cfg.sampling_params.max_tokens,
         logits_processors=logits_processors,
-        skip_special_tokens=False,
+        skip_special_tokens=cfg.sampling_params.skip_special_tokens,
     )
     return sampling_params
 
@@ -205,23 +204,24 @@ def main():
         cfg.merge_from_dict(options_dict)
     
     # Get values directly from merged config
-    model_path = cfg.model.path
-    input_path = cfg.paths.input
-    output_path = cfg.paths.output
-    prompt = cfg.prompt.default
-    crop_mode = cfg.image.crop_mode
+    # model_path = cfg.model.path
+    # input_path = cfg.paths.input
+    # output_path = cfg.paths.output
+    # prompt = cfg.prompt.default
+    # crop_mode = cfg.image.crop_mode
     
-    # Convert relative paths to absolute paths
-    if not os.path.isabs(model_path):
-        model_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, model_path))
-    if not os.path.isabs(input_path):
-        input_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, input_path))
-    if not os.path.isabs(output_path):
-        output_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, output_path))
+    # # Convert relative paths to absolute paths
+    # if not os.path.isabs(model_path):
+    #     model_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, model_path))
+    # if not os.path.isabs(input_path):
+    #     input_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, input_path))
+    # if not os.path.isabs(output_path):
+    #     output_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, output_path))
     
     # Create output directories
-    os.makedirs(output_path, exist_ok=True)
-    os.makedirs(f'{output_path}/images', exist_ok=True)
+    os.makedirs(cfg.paths.output, exist_ok=True)
+    os.makedirs(f'{cfg.paths.output}/images', exist_ok=True)
+    os.makedirs(cfg.model.path, exist_ok=True)
     
     # Build components
     # DeepseekOCRProcessor will handle model download and tokenizer loading internally
@@ -229,29 +229,34 @@ def main():
     print("Building components...")
     print("=" * 50)
     
-    processor = DeepseekOCRProcessor(cfg=cfg)
-    engine = build_engine(model_path, cfg)
+    processor = DeepseekOCRProcessor(model_path=cfg.model.path,
+                                     tokenizer=None, # we should give None then automatically download the tokenizer
+                                     image_size=cfg.image.image_size,
+                                     base_size=cfg.image.base_size,
+                                     min_crops=cfg.image.min_crops,
+                                     max_crops=cfg.image.max_crops)
+    engine = build_engine(cfg)
     sampling_params = build_sampling_params()
     
     # Load and process image
     print("=" * 50)
     print("Processing image...")
     print("=" * 50)
-    print(f"Loading image from: {input_path}")
-    image = load_image(input_path)
+    print(f"Loading image from: {cfg.paths.input}")
+    image = load_image(cfg.paths.input)
     if image is None:
-        raise ValueError(f"Failed to load image from {input_path}")
+        raise ValueError(f"Failed to load image from {cfg.paths.input}")
     image = image.convert('RGB')
     
     # Tokenize image
-    if '<image>' in prompt:
+    if '<image>' in cfg.prompt.default:
         print("Tokenizing image...")
         image_features = processor.tokenize_with_images(
-            conversation=prompt,
+            conversation=cfg.prompt.default,
             images=[image], 
             bos=True, 
             eos=True, 
-            cropping=crop_mode
+            cropping=cfg.image.crop_mode
         )
     else:
         image_features = None
@@ -260,7 +265,7 @@ def main():
     print("=" * 50)
     print("Running inference...")
     print("=" * 50)
-    result_out = asyncio.run(generate_text(engine, sampling_params, image_features, prompt))
+    result_out = asyncio.run(generate_text(engine, sampling_params, image_features, cfg.prompt.default))
     
     # Save results
     print("=" * 50)
@@ -270,13 +275,13 @@ def main():
     outputs = result_out
     
     matches_ref, matches_images, matches_other = re_match(outputs)
-    result = process_image_with_refs(image_draw, matches_ref, output_path)
+    result = process_image_with_refs(image_draw, matches_ref, cfg.paths.output)
     
-    save_results(outputs, output_path, matches_ref, matches_images, matches_other)
-    save_line_type_figure(outputs, output_path)
+    save_results(outputs, cfg.paths.output, matches_ref, matches_images, matches_other)
+    save_line_type_figure(outputs, cfg.paths.output)
     
-    result.save(f'{output_path}/result_with_boxes.jpg')
-    print(f"Results saved to: {output_path}")
+    result.save(f'{cfg.paths.output}/result_with_boxes.jpg')
+    print(f"Results saved to: {cfg.paths.output}")
 
 
 if __name__ == "__main__":

@@ -25,6 +25,23 @@ processing = dict(
     skip_repeat=True,
 )
 
+
+logits_processors = dict(
+    type='NoRepeatNGramLogitsProcessor',
+    ngram_size=30,
+    window_size=90,
+    whitelist_token_ids={128821, 128822}
+)
+
+sampling_params = dict(
+    temperature=0.0,
+    max_tokens=8192,
+    logits_processors=logits_processors,
+    skip_special_tokens=False,
+)
+
+
+
 # Input/Output paths
 paths = dict(
     input='data/test_1.png',  # Input file path (.pdf, .jpg, .png, .jpeg)
