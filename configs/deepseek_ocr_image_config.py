@@ -5,7 +5,9 @@ This file should only contain variable definitions, no classes or functions.
 
 # Model configuration
 model = dict(
-    path='./weights/DeepSeek-OCR',  # Model weights path
+    
+    tokenizer_path='./weights/DeepSeek-OCR/tokenizer',  # Tokenizer path
+    ckpt_path='./weights/DeepSeek-OCR/ckpt',  # Model weights path
 )
 
 # Image processing configuration
