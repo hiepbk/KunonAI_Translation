@@ -1,13 +1,12 @@
 """
 Inference pipeline for DeepSeek-OCR on image files.
-Supports command-line arguments to override config values.
+Supports command-line arguments to override config values (like mmdet3d).
 """
 import asyncio
 import argparse
 import os
-import re
 from pathlib import Path
-from deepseekocr_net.utils.config import Config
+from typing import Optional
 
 import torch
 if torch.version.cuda == '11.8':
@@ -21,133 +20,99 @@ from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.model_executor.models.registry import ModelRegistry
 from transformers import AutoTokenizer
 import time
-from PIL import Image, ImageDraw, ImageFont, ImageOps
-import numpy as np
+from PIL import Image
 from tqdm import tqdm
 
+from deepseekocr_net.utils.config import Config
 from deepseekocr_net.deepseek_ocr import DeepseekOCRForCausalLM
 from deepseekocr_net.process.ngram_norepeat import NoRepeatNGramLogitsProcessor
 from deepseekocr_net.process.image_process import DeepseekOCRProcessor
+from tools.utils import (
+    load_image,
+    re_match,
+    process_image_with_refs,
+    save_results,
+    save_line_type_figure,
+)
 
 # Register the model
 ModelRegistry.register_model("DeepseekOCRForCausalLM", DeepseekOCRForCausalLM)
 
 
-def load_image(image_path):
-    """Load and correct image orientation."""
-    try:
-        image = Image.open(image_path)
-        corrected_image = ImageOps.exif_transpose(image)
-        return corrected_image
-    except Exception as e:
-        print(f"error: {e}")
-        try:
-            return Image.open(image_path)
-        except:
-            return None
-
-
-def re_match(text):
-    """Extract reference matches from text."""
-    pattern = r'(<\|ref\|>(.*?)<\|/ref\|><\|det\|>(.*?)<\|/det\|>)'
-    matches = re.findall(pattern, text, re.DOTALL)
-
-    mathes_image = []
-    mathes_other = []
-    for a_match in matches:
-        if '<|ref|>image<|/ref|>' in a_match[0]:
-            mathes_image.append(a_match[0])
-        else:
-            mathes_other.append(a_match[0])
-    return matches, mathes_image, mathes_other
-
-
-def extract_coordinates_and_label(ref_text, image_width, image_height):
-    """Extract coordinates and label from reference text."""
-    try:
-        label_type = ref_text[1]
-        cor_list = eval(ref_text[2])
-    except Exception as e:
-        print(e)
-        return None
-    return (label_type, cor_list)
-
-
-def draw_bounding_boxes(image, refs, output_path):
-    """Draw bounding boxes on image."""
-    image_width, image_height = image.size
-    img_draw = image.copy()
-    draw = ImageDraw.Draw(img_draw)
-
-    overlay = Image.new('RGBA', img_draw.size, (0, 0, 0, 0))
-    draw2 = ImageDraw.Draw(overlay)
+def build_tokenizer(model_path: str, cfg) -> AutoTokenizer:
+    """Build tokenizer from model path.
     
-    font = ImageFont.load_default()
-
-    img_idx = 0
+    Args:
+        model_path: Path to model (local or HuggingFace ID)
+        cfg: Config object
+        
+    Returns:
+        AutoTokenizer instance
+    """
+    print(f"Loading tokenizer from: {model_path}")
     
-    for i, ref in enumerate(refs):
-        try:
-            result = extract_coordinates_and_label(ref, image_width, image_height)
-            if result:
-                label_type, points_list = result
-                
-                color = (np.random.randint(0, 200), np.random.randint(0, 200), np.random.randint(0, 255))
-                color_a = color + (20, )
-                for points in points_list:
-                    x1, y1, x2, y2 = points
-
-                    x1 = int(x1 / 999 * image_width)
-                    y1 = int(y1 / 999 * image_height)
-                    x2 = int(x2 / 999 * image_width)
-                    y2 = int(y2 / 999 * image_height)
-
-                    if label_type == 'image':
-                        try:
-                            cropped = image.crop((x1, y1, x2, y2))
-                            cropped.save(f"{output_path}/images/{img_idx}.jpg")
-                        except Exception as e:
-                            print(e)
-                            pass
-                        img_idx += 1
-                        
-                    try:
-                        if label_type == 'title':
-                            draw.rectangle([x1, y1, x2, y2], outline=color, width=4)
-                            draw2.rectangle([x1, y1, x2, y2], fill=color_a, outline=(0, 0, 0, 0), width=1)
-                        else:
-                            draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
-                            draw2.rectangle([x1, y1, x2, y2], fill=color_a, outline=(0, 0, 0, 0), width=1)
-
-                        text_x = x1
-                        text_y = max(0, y1 - 15)
-                            
-                        text_bbox = draw.textbbox((0, 0), label_type, font=font)
-                        text_width = text_bbox[2] - text_bbox[0]
-                        text_height = text_bbox[3] - text_bbox[1]
-                        draw.rectangle([text_x, text_y, text_x + text_width, text_y + text_height], 
-                                    fill=(255, 255, 255, 30))
-                        
-                        draw.text((text_x, text_y), label_type, font=font, fill=color)
-                    except:
-                        pass
-        except:
-            continue
-    img_draw.paste(overlay, (0, 0), overlay)
-    return img_draw
+    # Check if local path exists
+    if os.path.exists(model_path) and os.path.isdir(model_path):
+        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, local_files_only=True)
+    else:
+        # Download to local weights folder (not HuggingFace cache)
+        from huggingface_hub import snapshot_download
+        hf_model_id = 'deepseek-ai/DeepSeek-OCR'
+        print(f"Local model path not found ({model_path}), downloading to: {model_path}")
+        os.makedirs(model_path, exist_ok=True)
+        
+        # Download tokenizer files to local path
+        print("Downloading tokenizer files...")
+        snapshot_download(
+            repo_id=hf_model_id,
+            local_dir=model_path,
+            local_dir_use_symlinks=False,
+            allow_patterns=["tokenizer*", "*.json", "*.txt"],
+            ignore_patterns=["*.safetensors", "*.bin", "*.pt", "*.pth"],
+        )
+        
+        # Load tokenizer from local path
+        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, local_files_only=True)
+        print(f"Tokenizer loaded from: {model_path}")
+    
+    return tokenizer
 
 
-def process_image_with_refs(image, ref_texts, output_path):
-    """Process image with reference texts."""
-    result_image = draw_bounding_boxes(image, ref_texts, output_path)
-    return result_image
+def build_processor(tokenizer: AutoTokenizer, cfg) -> DeepseekOCRProcessor:
+    """Build image processor with tokenizer and config parameters.
+    
+    Args:
+        tokenizer: AutoTokenizer instance
+        cfg: Config object
+        
+    Returns:
+        DeepseekOCRProcessor instance
+    """
+    processor = DeepseekOCRProcessor(
+        tokenizer=tokenizer,
+        image_size=cfg.image.image_size,
+        base_size=cfg.image.base_size,
+        min_crops=cfg.image.min_crops,
+        max_crops=cfg.image.max_crops,
+    )
+    return processor
 
 
-async def stream_generate(model_path, tokenizer, image=None, prompt='', crop_mode=True,
-                         image_size=640, base_size=1024, min_crops=2, max_crops=6):
-    """Generate text stream from image and prompt."""
+def build_engine(model_path: str, cfg) -> AsyncLLMEngine:
+    """Build vLLM async engine.
+    
+    Args:
+        model_path: Path to model (local or HuggingFace ID)
+        cfg: Config object
+        
+    Returns:
+        AsyncLLMEngine instance
+    """
+    # Determine model path for vLLM
+    vllm_model_path = model_path if (os.path.exists(model_path) and os.path.isdir(model_path)) else 'deepseek-ai/DeepSeek-OCR'
+    
     engine_args = AsyncEngineArgs(
-        model=model_path,
+        model=vllm_model_path,
         hf_overrides={"architectures": ["DeepseekOCRForCausalLM"]},
         block_size=256,
         max_model_len=8192,
@@ -157,14 +122,22 @@ async def stream_generate(model_path, tokenizer, image=None, prompt='', crop_mod
         gpu_memory_utilization=0.75,
         # Pass processor parameters through mm_processor_kwargs
         mm_processor_kwargs={
-            'image_size': image_size,
-            'base_size': base_size,
-            'min_crops': min_crops,
-            'max_crops': max_crops,
+            'image_size': cfg.image.image_size,
+            'base_size': cfg.image.base_size,
+            'min_crops': cfg.image.min_crops,
+            'max_crops': cfg.image.max_crops,
         },
     )
     engine = AsyncLLMEngine.from_engine_args(engine_args)
+    return engine
+
+
+def build_sampling_params() -> SamplingParams:
+    """Build sampling parameters for generation.
     
+    Returns:
+        SamplingParams instance
+    """
     logits_processors = [NoRepeatNGramLogitsProcessor(
         ngram_size=30, 
         window_size=90, 
@@ -177,26 +150,38 @@ async def stream_generate(model_path, tokenizer, image=None, prompt='', crop_mod
         logits_processors=logits_processors,
         skip_special_tokens=False,
     )
+    return sampling_params
+
+
+async def generate_text(engine: AsyncLLMEngine, sampling_params: SamplingParams, 
+                       image_features, prompt: str) -> str:
+    """Generate text from image and prompt using vLLM engine.
     
+    Args:
+        engine: AsyncLLMEngine instance
+        sampling_params: SamplingParams instance
+        image_features: Processed image features
+        prompt: Text prompt
+        
+    Returns:
+        Generated text output
+    """
     request_id = f"request-{int(time.time())}"
+    printed_length = 0
 
-    printed_length = 0  
-
-    if image and '<image>' in prompt:
+    if image_features and '<image>' in prompt:
         request = {
             "prompt": prompt,
-            "multi_modal_data": {"image": image}
+            "multi_modal_data": {"image": image_features}
         }
     elif prompt:
         request = {
             "prompt": prompt
         }
     else:
-        assert False, f'prompt is none!!!'
+        raise ValueError("Prompt is required")
     
-    async for request_output in engine.generate(
-        request, sampling_params, request_id
-    ):
+    async for request_output in engine.generate(request, sampling_params, request_id):
         if request_output.outputs:
             full_text = request_output.outputs[0].text
             new_text = full_text[printed_length:]
@@ -209,7 +194,7 @@ async def stream_generate(model_path, tokenizer, image=None, prompt='', crop_mod
 
 
 def parse_arguments():
-    """Parse command-line arguments."""
+    """Parse command-line arguments (like mmdet3d)."""
     parser = argparse.ArgumentParser(
         description='DeepSeek-OCR Inference Pipeline for Images',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -263,7 +248,7 @@ def main():
     """Main inference function."""
     args = parse_arguments()
     
-    # load the config file from path args.config
+    # Load config
     cfg = Config.from_file(args.config)
     
     # Merge cfg-options if provided
@@ -282,31 +267,39 @@ def main():
     prompt = cfg.prompt.default
     crop_mode = cfg.image.crop_mode
     
+    # Convert relative paths to absolute paths
+    if not os.path.isabs(model_path):
+        model_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, model_path))
+    if not os.path.isabs(input_path):
+        input_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, input_path))
+    if not os.path.isabs(output_path):
+        output_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, output_path))
+    
     # Create output directories
     os.makedirs(output_path, exist_ok=True)
     os.makedirs(f'{output_path}/images', exist_ok=True)
     
-    # Load image
+    # Build components
+    print("=" * 50)
+    print("Building components...")
+    print("=" * 50)
+    
+    tokenizer = build_tokenizer(model_path, cfg)
+    processor = build_processor(tokenizer, cfg)
+    engine = build_engine(model_path, cfg)
+    sampling_params = build_sampling_params()
+    
+    # Load and process image
+    print("=" * 50)
+    print("Processing image...")
+    print("=" * 50)
     print(f"Loading image from: {input_path}")
     image = load_image(input_path)
     if image is None:
         raise ValueError(f"Failed to load image from {input_path}")
     image = image.convert('RGB')
     
-    # Create tokenizer
-    print(f"Loading tokenizer from: {model_path}")
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    
-    # Create processor with tokenizer and parameters (from merged config)
-    processor = DeepseekOCRProcessor(
-        tokenizer=tokenizer,
-        image_size=cfg.image.image_size,
-        base_size=cfg.image.base_size,
-        min_crops=cfg.image.min_crops,
-        max_crops=cfg.image.max_crops,
-    )
-    
-    # Process image
+    # Tokenize image
     if '<image>' in prompt:
         print("Tokenizing image...")
         image_features = processor.tokenize_with_images(
@@ -317,85 +310,26 @@ def main():
             cropping=crop_mode
         )
     else:
-        image_features = ''
+        image_features = None
     
     # Run inference
+    print("=" * 50)
     print("Running inference...")
-    result_out = asyncio.run(stream_generate(
-        model_path, tokenizer, image_features, prompt, crop_mode,
-        image_size=cfg.image.image_size,
-        base_size=cfg.image.base_size,
-        min_crops=cfg.image.min_crops,
-        max_crops=cfg.image.max_crops,
-    ))
+    print("=" * 50)
+    result_out = asyncio.run(generate_text(engine, sampling_params, image_features, prompt))
     
     # Save results
-    print('='*15 + 'save results:' + '='*15)
+    print("=" * 50)
+    print("Saving results...")
+    print("=" * 50)
     image_draw = image.copy()
     outputs = result_out
     
-    with open(f'{output_path}/result_ori.mmd', 'w', encoding='utf-8') as afile:
-        afile.write(outputs)
-    
-    matches_ref, matches_images, mathes_other = re_match(outputs)
+    matches_ref, matches_images, matches_other = re_match(outputs)
     result = process_image_with_refs(image_draw, matches_ref, output_path)
     
-    for idx, a_match_image in enumerate(tqdm(matches_images, desc="image")):
-        outputs = outputs.replace(a_match_image, f'![](images/' + str(idx) + '.jpg)\n')
-    
-    for idx, a_match_other in enumerate(tqdm(mathes_other, desc="other")):
-        outputs = outputs.replace(a_match_other, '').replace('\\coloneqq', ':=').replace('\\eqqcolon', '=:')
-    
-    with open(f'{output_path}/result.mmd', 'w', encoding='utf-8') as afile:
-        afile.write(outputs)
-    
-    # Handle special line_type output
-    if 'line_type' in outputs:
-        import matplotlib.pyplot as plt
-        from matplotlib.patches import Circle
-        lines = eval(outputs)['Line']['line']
-        line_type = eval(outputs)['Line']['line_type']
-        endpoints = eval(outputs)['Line']['line_endpoint']
-        
-        fig, ax = plt.subplots(figsize=(3,3), dpi=200)
-        ax.set_xlim(-15, 15)
-        ax.set_ylim(-15, 15)
-        
-        for idx, line in enumerate(lines):
-            try:
-                p0 = eval(line.split(' -- ')[0])
-                p1 = eval(line.split(' -- ')[-1])
-                
-                if line_type[idx] == '--':
-                    ax.plot([p0[0], p1[0]], [p0[1], p1[1]], linewidth=0.8, color='k')
-                else:
-                    ax.plot([p0[0], p1[0]], [p0[1], p1[1]], linewidth=0.8, color='k')
-                
-                ax.scatter(p0[0], p0[1], s=5, color='k')
-                ax.scatter(p1[0], p1[1], s=5, color='k')
-            except:
-                pass
-        
-        for endpoint in endpoints:
-            label = endpoint.split(': ')[0]
-            (x, y) = eval(endpoint.split(': ')[1])
-            ax.annotate(label, (x, y), xytext=(1, 1), textcoords='offset points', 
-                        fontsize=5, fontweight='light')
-        
-        try:
-            if 'Circle' in eval(outputs).keys():
-                circle_centers = eval(outputs)['Circle']['circle_center']
-                radius = eval(outputs)['Circle']['radius']
-                
-                for center, r in zip(circle_centers, radius):
-                    center = eval(center.split(': ')[1])
-                    circle = Circle(center, radius=r, fill=False, edgecolor='black', linewidth=0.8)
-                    ax.add_patch(circle)
-        except:
-            pass
-        
-        plt.savefig(f'{output_path}/geo.jpg')
-        plt.close()
+    save_results(outputs, output_path, matches_ref, matches_images, matches_other)
+    save_line_type_figure(outputs, output_path)
     
     result.save(f'{output_path}/result_with_boxes.jpg')
     print(f"Results saved to: {output_path}")
@@ -403,4 +337,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
