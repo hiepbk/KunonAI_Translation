@@ -46,45 +46,26 @@ from addict import Dict
 # The image token id may be various
 _IMAGE_TOKEN = "<image>"
 
-# Global registry for model parameters (set by inference pipeline)
-_model_params_registry = {}
-
-def set_model_params(image_size=640, base_size=1024, crop_mode=True, min_crops=2, max_crops=6, print_num_vis_tokens=False):
-    """Set global model parameters. Called by inference pipeline before model initialization."""
-    global _model_params_registry
-    _model_params_registry = {
-        'image_size': image_size,
-        'base_size': base_size,
-        'crop_mode': crop_mode,
-        'min_crops': min_crops,
-        'max_crops': max_crops,
-        'print_num_vis_tokens': print_num_vis_tokens,
-    }
-
-def get_model_params():
-    """Get global model parameters."""
-    global _model_params_registry
-    return _model_params_registry.copy() if _model_params_registry else {
-        'image_size': 640,
-        'base_size': 1024,
-        'crop_mode': True,
-        'min_crops': 2,
-        'max_crops': 6,
-        'print_num_vis_tokens': False,
-    }
-
-
 class DeepseekOCRProcessingInfo(BaseProcessingInfo):
-    def __init__(self, *args, **kwargs):
+    def __init__(
+        self, 
+        *args, 
+        image_size: int = 640,
+        base_size: int = 1024,
+        crop_mode: bool = True,
+        min_crops: int = 2,
+        max_crops: int = 6,
+        print_num_vis_tokens: bool = False,
+        **kwargs
+    ):
         super().__init__(*args, **kwargs)
-        # Get parameters from global registry (set by inference pipeline)
-        params = get_model_params()
-        self.image_size = params['image_size']
-        self.base_size = params['base_size']
-        self.crop_mode = params['crop_mode']
-        self.min_crops = params['min_crops']
-        self.max_crops = params['max_crops']
-        self.print_num_vis_tokens = params['print_num_vis_tokens']
+        # Essential parameters - explicitly declared
+        self.image_size = image_size
+        self.base_size = base_size
+        self.crop_mode = crop_mode
+        self.min_crops = min_crops
+        self.max_crops = max_crops
+        self.print_num_vis_tokens = print_num_vis_tokens
 
     def get_hf_config(self):
         return self.ctx.get_hf_config(DeepseekVLV2Config)

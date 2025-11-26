@@ -24,7 +24,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 import numpy as np
 from tqdm import tqdm
 
-from deepseekocr_net.deepseek_ocr import DeepseekOCRForCausalLM, set_model_params
+from deepseekocr_net.deepseek_ocr import DeepseekOCRForCausalLM
 from deepseekocr_net.process.ngram_norepeat import NoRepeatNGramLogitsProcessor
 from deepseekocr_net.process.image_process import DeepseekOCRProcessor
 from configs.config import (
@@ -151,7 +151,8 @@ def process_image_with_refs(image, ref_texts, output_path):
     return result_image
 
 
-async def stream_generate(model_path, tokenizer, image=None, prompt='', crop_mode=True):
+async def stream_generate(model_path, tokenizer, image=None, prompt='', crop_mode=True,
+                         image_size=640, base_size=1024, min_crops=2, max_crops=6):
     """Generate text stream from image and prompt."""
     engine_args = AsyncEngineArgs(
         model=model_path,
@@ -162,6 +163,13 @@ async def stream_generate(model_path, tokenizer, image=None, prompt='', crop_mod
         trust_remote_code=True,  
         tensor_parallel_size=1,
         gpu_memory_utilization=0.75,
+        # Pass processor parameters through mm_processor_kwargs
+        mm_processor_kwargs={
+            'image_size': image_size,
+            'base_size': base_size,
+            'min_crops': min_crops,
+            'max_crops': max_crops,
+        },
     )
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     
@@ -289,16 +297,8 @@ def main():
         raise ValueError(f"Failed to load image from {input_path}")
     image = image.convert('RGB')
     
-    # Set model parameters before vLLM initializes the model
+    # Get model parameters from config
     from configs.config import BASE_SIZE, IMAGE_SIZE, MIN_CROPS, MAX_CROPS
-    set_model_params(
-        image_size=IMAGE_SIZE,
-        base_size=BASE_SIZE,
-        crop_mode=crop_mode,
-        min_crops=MIN_CROPS,
-        max_crops=MAX_CROPS,
-        print_num_vis_tokens=False,
-    )
     
     # Create tokenizer
     print(f"Loading tokenizer from: {model_path}")
@@ -328,7 +328,13 @@ def main():
     
     # Run inference
     print("Running inference...")
-    result_out = asyncio.run(stream_generate(model_path, tokenizer, image_features, prompt, crop_mode))
+    result_out = asyncio.run(stream_generate(
+        model_path, tokenizer, image_features, prompt, crop_mode,
+        image_size=IMAGE_SIZE,
+        base_size=BASE_SIZE,
+        min_crops=MIN_CROPS,
+        max_crops=MAX_CROPS,
+    ))
     
     # Save results
     print('='*15 + 'save results:' + '='*15)
