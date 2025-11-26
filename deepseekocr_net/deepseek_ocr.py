@@ -42,18 +42,63 @@ from .deepencoder.clip_sdpa import build_clip_l
 from .deepencoder.build_linear import MlpProjector
 from addict import Dict
 # import time
-from configs.config import IMAGE_SIZE, BASE_SIZE, CROP_MODE, PRINT_NUM_VIS_TOKENS, PROMPT
+# Removed config imports - parameters should be passed during initialization
 # The image token id may be various
 _IMAGE_TOKEN = "<image>"
 
+# Global registry for model parameters (set by inference pipeline)
+_model_params_registry = {}
+
+def set_model_params(image_size=640, base_size=1024, crop_mode=True, min_crops=2, max_crops=6, print_num_vis_tokens=False):
+    """Set global model parameters. Called by inference pipeline before model initialization."""
+    global _model_params_registry
+    _model_params_registry = {
+        'image_size': image_size,
+        'base_size': base_size,
+        'crop_mode': crop_mode,
+        'min_crops': min_crops,
+        'max_crops': max_crops,
+        'print_num_vis_tokens': print_num_vis_tokens,
+    }
+
+def get_model_params():
+    """Get global model parameters."""
+    global _model_params_registry
+    return _model_params_registry.copy() if _model_params_registry else {
+        'image_size': 640,
+        'base_size': 1024,
+        'crop_mode': True,
+        'min_crops': 2,
+        'max_crops': 6,
+        'print_num_vis_tokens': False,
+    }
+
 
 class DeepseekOCRProcessingInfo(BaseProcessingInfo):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Get parameters from global registry (set by inference pipeline)
+        params = get_model_params()
+        self.image_size = params['image_size']
+        self.base_size = params['base_size']
+        self.crop_mode = params['crop_mode']
+        self.min_crops = params['min_crops']
+        self.max_crops = params['max_crops']
+        self.print_num_vis_tokens = params['print_num_vis_tokens']
 
     def get_hf_config(self):
         return self.ctx.get_hf_config(DeepseekVLV2Config)
 
     def get_hf_processor(self, **kwargs: object):
-        return self.ctx.get_hf_processor(DeepseekOCRProcessor, **kwargs)
+        # Pass stored parameters to processor if not already provided
+        processor_kwargs = {
+            'image_size': kwargs.get('image_size', self.image_size),
+            'base_size': kwargs.get('base_size', self.base_size),
+            'min_crops': kwargs.get('min_crops', self.min_crops),
+            'max_crops': kwargs.get('max_crops', self.max_crops),
+        }
+        processor_kwargs.update(kwargs)
+        return self.ctx.get_hf_processor(DeepseekOCRProcessor, **processor_kwargs)
 
     def get_supported_mm_limits(self) -> Mapping[str, Optional[int]]:
         return {"image": None}
@@ -70,19 +115,23 @@ class DeepseekOCRProcessingInfo(BaseProcessingInfo):
         # patch_size = hf_processor.patch_size
         # downsample_ratio = hf_processor.downsample_ratio
 
-        image_size = IMAGE_SIZE
-        base_size = BASE_SIZE
+        # Get parameters from processor or use defaults
+        image_size = getattr(hf_processor, 'image_size', 640)
+        base_size = getattr(hf_processor, 'base_size', 1024)
         patch_size = 16
         downsample_ratio = 4
 
-        if CROP_MODE:
+        crop_mode = getattr(self, 'crop_mode', True)
+        if crop_mode:
             if image_width <= 640 and image_height <= 640:
                 crop_ratio = [1, 1]
             else:
                 # images_crop_raw, crop_ratio = hf_processor.dynamic_preprocess(image)
 
                 # find the closest aspect ratio to the target
-                crop_ratio = count_tiles(image_width, image_height, image_size=IMAGE_SIZE)
+                min_crops = getattr(hf_processor, 'min_crops', 2)
+                max_crops = getattr(hf_processor, 'max_crops', 6)
+                crop_ratio = count_tiles(image_width, image_height, min_num=min_crops, max_num=max_crops, image_size=image_size)
 
                 # print('===========')
                 # print('crop_ratio ', crop_ratio)
@@ -106,8 +155,9 @@ class DeepseekOCRProcessingInfo(BaseProcessingInfo):
         return global_views_tokens + local_views_tokens + 1
 
     def get_image_size_with_most_features(self) -> ImageSize:
-
-        if IMAGE_SIZE == 1024 and BASE_SIZE == 1280:
+        image_size = getattr(self, 'image_size', 640)
+        base_size = getattr(self, 'base_size', 1024)
+        if image_size == 1024 and base_size == 1280:
             return ImageSize(width=1024*2, height=1024*2)
         return ImageSize(width=640*2, height=640*2)
 
@@ -131,18 +181,24 @@ class DeepseekOCRDummyInputsBuilder(
         num_images = mm_counts.get("image", 0)
 
         max_image_size = self.info.get_image_size_with_most_features()
+        crop_mode = getattr(self.info, 'crop_mode', True)
 
-        if '<image>' in PROMPT:
-            return {
-                "image":
-                DeepseekOCRProcessor().tokenize_with_images(images = self._get_dummy_images(width=max_image_size.width,
-                                    height=max_image_size.height,
-                                    num_images=num_images), bos=True, eos=True, cropping=CROP_MODE)
-            }
-        else:
-            return {
-                "image": []
-            }
+        # For dummy inputs, we assume image token is in prompt (vLLM will handle actual prompt)
+        processor = self.info.get_hf_processor()
+        return {
+            "image":
+            processor.tokenize_with_images(
+                conversation="<image>",  # Dummy conversation for dummy inputs
+                images=self._get_dummy_images(
+                    width=max_image_size.width,
+                    height=max_image_size.height,
+                    num_images=num_images
+                ), 
+                bos=True, 
+                eos=True, 
+                cropping=crop_mode
+            )
+        }
 
 
 

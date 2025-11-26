@@ -14,7 +14,7 @@ MAX_CONCURRENCY = 100 # If you have limited GPU memory, lower the concurrency co
 NUM_WORKERS = 64 # image pre-process (resize/padding) workers 
 PRINT_NUM_VIS_TOKENS = False
 SKIP_REPEAT = True
-MODEL_PATH = 'deepseek-ai/DeepSeek-OCR' # change to your model path
+MODEL_PATH = './weights/DeepSeek-OCR' # change to your model path, defaults to local weights folder
 
 # TODO: change INPUT_PATH
 # .pdf: run_dpsk_ocr_pdf.py; 
@@ -35,8 +35,3 @@ PROMPT = '<image>\n<|grounding|>Convert the document to markdown.'
 # rec: <image>\nLocate <|ref|>xxxx<|/ref|> in the image.
 # '先天下之忧而忧'
 # .......
-
-
-from transformers import AutoTokenizer
-
-TOKENIZER = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)

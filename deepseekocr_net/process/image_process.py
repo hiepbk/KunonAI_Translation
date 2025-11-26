@@ -6,7 +6,7 @@ import torchvision.transforms as T
 from PIL import Image, ImageOps
 from transformers import AutoProcessor, BatchFeature, LlamaTokenizerFast
 from transformers.processing_utils import ProcessorMixin
-from configs.config import IMAGE_SIZE, BASE_SIZE, CROP_MODE, MIN_CROPS, MAX_CROPS, PROMPT, TOKENIZER
+# Removed config imports - parameters should be passed during initialization
 
 def find_closest_aspect_ratio(aspect_ratio, target_ratios, width, height, image_size):
     best_ratio_diff = float('inf')
@@ -25,7 +25,7 @@ def find_closest_aspect_ratio(aspect_ratio, target_ratios, width, height, image_
     return best_ratio
 
 
-def count_tiles(orig_width, orig_height, min_num=MIN_CROPS, max_num=MAX_CROPS, image_size=640, use_thumbnail=False):
+def count_tiles(orig_width, orig_height, min_num=2, max_num=6, image_size=640, use_thumbnail=False):
     aspect_ratio = orig_width / orig_height
 
     # calculate the existing image aspect ratio
@@ -42,7 +42,7 @@ def count_tiles(orig_width, orig_height, min_num=MIN_CROPS, max_num=MAX_CROPS, i
     return target_aspect_ratio
 
 
-def dynamic_preprocess(image, min_num=MIN_CROPS, max_num=MAX_CROPS, image_size=640, use_thumbnail=False):
+def dynamic_preprocess(image, min_num=2, max_num=6, image_size=640, use_thumbnail=False):
     orig_width, orig_height = image.size
     aspect_ratio = orig_width / orig_height
 
@@ -114,7 +114,11 @@ class DeepseekOCRProcessor(ProcessorMixin):
 
     def __init__(
         self,
-        tokenizer: LlamaTokenizerFast = TOKENIZER,
+        tokenizer: LlamaTokenizerFast = None,
+        image_size: int = 640,
+        base_size: int = 1024,
+        min_crops: int = 2,
+        max_crops: int = 6,
         candidate_resolutions: Tuple[Tuple[int, int]] = [[1024, 1024]],
         patch_size: int = 16,
         downsample_ratio: int = 4,
@@ -129,10 +133,14 @@ class DeepseekOCRProcessor(ProcessorMixin):
         ignore_id: int = -100,
         **kwargs,
     ):
+        if tokenizer is None:
+            raise ValueError("tokenizer must be provided to DeepseekOCRProcessor")
 
         # self.candidate_resolutions = candidate_resolutions # placeholder no use
-        self.image_size = IMAGE_SIZE
-        self.base_size = BASE_SIZE
+        self.image_size = image_size
+        self.base_size = base_size
+        self.min_crops = min_crops
+        self.max_crops = max_crops
         # self.patch_size = patch_size
         self.patch_size = 16 
         self.image_mean = image_mean
@@ -329,16 +337,13 @@ class DeepseekOCRProcessor(ProcessorMixin):
 
     def tokenize_with_images(
         self,
-        # conversation: str,
+        conversation: str,
         images: List[Image.Image],
         bos: bool = True,
         eos: bool = True,
         cropping: bool = True,
     ):
         """Tokenize text with <image> tags."""
-
-        # print(conversation)
-        conversation = PROMPT
         assert conversation.count(self.image_token) == len(images)
         text_splits = conversation.split(self.image_token)
         images_list, images_crop_list, images_seq_mask, images_spatial_crop = [], [], [], []
@@ -368,7 +373,12 @@ class DeepseekOCRProcessor(ProcessorMixin):
                     # best_width, best_height = select_best_resolution(image.size, self.candidate_resolutions)
                     # print('image ', image.size)
                     # print('open_size:', image.size)
-                    images_crop_raw, crop_ratio = dynamic_preprocess(image, image_size=IMAGE_SIZE)
+                    images_crop_raw, crop_ratio = dynamic_preprocess(
+                        image, 
+                        min_num=self.min_crops, 
+                        max_num=self.max_crops, 
+                        image_size=self.image_size
+                    )
                     # print('crop_ratio: ', crop_ratio)
                 else:
                     # best_width, best_height = self.image_size, self.image_size
