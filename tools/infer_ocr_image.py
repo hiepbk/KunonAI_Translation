@@ -110,6 +110,7 @@ def build_tokenizer(tokenizer_path: str, cfg) -> AutoTokenizer:
             "model*.json",          # Model config (not tokenizer)
             "config.json",          # Model config (not tokenizer)
         ],
+        
     )
     
     # Load tokenizer from local path
