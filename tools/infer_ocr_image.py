@@ -27,15 +27,7 @@ from tqdm import tqdm
 from deepseekocr_net.deepseek_ocr import DeepseekOCRForCausalLM
 from deepseekocr_net.process.ngram_norepeat import NoRepeatNGramLogitsProcessor
 from deepseekocr_net.process.image_process import DeepseekOCRProcessor
-from configs.config import (
-    MODEL_PATH as DEFAULT_MODEL_PATH,
-    INPUT_PATH as DEFAULT_INPUT_PATH,
-    OUTPUT_PATH as DEFAULT_OUTPUT_PATH,
-    PROMPT as DEFAULT_PROMPT,
-    CROP_MODE as DEFAULT_CROP_MODE,
-    BASE_SIZE,
-    IMAGE_SIZE,
-)
+from configs import cfg
 
 # Register the model
 ModelRegistry.register_model("DeepseekOCRForCausalLM", DeepseekOCRForCausalLM)
@@ -227,7 +219,7 @@ def parse_arguments():
         '--model-path',
         type=str,
         default=None,
-        help=f'Path to model weights (default: {DEFAULT_MODEL_PATH} or from config)'
+        help=f'Path to model weights (default: {cfg.model.path} or from config)'
     )
     
     parser.add_argument(
@@ -236,7 +228,7 @@ def parse_arguments():
         type=str,
         dest='input_path',
         default=None,
-        help=f'Input image path (default: {DEFAULT_INPUT_PATH} or from config)'
+        help=f'Input image path (default: {cfg.paths.input} or from config)'
     )
     
     parser.add_argument(
@@ -245,21 +237,21 @@ def parse_arguments():
         type=str,
         dest='output_path',
         default=None,
-        help=f'Output directory path (default: {DEFAULT_OUTPUT_PATH} or from config)'
+        help=f'Output directory path (default: {cfg.paths.output} or from config)'
     )
     
     parser.add_argument(
         '--prompt',
         type=str,
         default=None,
-        help=f'Prompt for OCR (default: {DEFAULT_PROMPT} or from config)'
+        help=f'Prompt for OCR (default: {cfg.prompt.default} or from config)'
     )
     
     parser.add_argument(
         '--crop-mode',
         action='store_true',
         default=None,
-        help='Enable crop mode (default: from config)'
+        help=f'Enable crop mode (default: {cfg.image.crop_mode} from config)'
     )
     
     return parser.parse_args()
@@ -270,21 +262,21 @@ def main():
     args = parse_arguments()
     
     # Determine model path (argument > config > default)
-    model_path = args.model_path or DEFAULT_MODEL_PATH or './weights/DeepSeek-OCR'
+    model_path = args.model_path or cfg.model.path or './weights/DeepSeek-OCR'
     
     # Determine input path (argument > config)
-    input_path = args.input_path or DEFAULT_INPUT_PATH
+    input_path = args.input_path or cfg.paths.input
     if not input_path:
         raise ValueError("Input path must be provided via --input or set in config")
     
     # Determine output path (argument > config > default)
-    output_path = args.output_path or DEFAULT_OUTPUT_PATH or './results'
+    output_path = args.output_path or cfg.paths.output or './results'
     
     # Determine prompt (argument > config > default)
-    prompt = args.prompt or DEFAULT_PROMPT or '<image>\n<|grounding|>Convert the document to markdown.'
+    prompt = args.prompt or cfg.prompt.default or '<image>\n<|grounding|>Convert the document to markdown.'
     
     # Determine crop mode (argument > config > default)
-    crop_mode = args.crop_mode if args.crop_mode is not None else DEFAULT_CROP_MODE
+    crop_mode = args.crop_mode if args.crop_mode is not None else cfg.image.crop_mode
     
     # Create output directories
     os.makedirs(output_path, exist_ok=True)
@@ -297,8 +289,7 @@ def main():
         raise ValueError(f"Failed to load image from {input_path}")
     image = image.convert('RGB')
     
-    # Get model parameters from config
-    from configs.config import BASE_SIZE, IMAGE_SIZE, MIN_CROPS, MAX_CROPS
+    # Get model parameters from config (using dot notation)
     
     # Create tokenizer
     print(f"Loading tokenizer from: {model_path}")
@@ -307,10 +298,10 @@ def main():
     # Create processor with tokenizer and parameters
     processor = DeepseekOCRProcessor(
         tokenizer=tokenizer,
-        image_size=IMAGE_SIZE,
-        base_size=BASE_SIZE,
-        min_crops=MIN_CROPS,
-        max_crops=MAX_CROPS,
+        image_size=cfg.image.image_size,
+        base_size=cfg.image.base_size,
+        min_crops=cfg.image.min_crops,
+        max_crops=cfg.image.max_crops,
     )
     
     # Process image
@@ -330,10 +321,10 @@ def main():
     print("Running inference...")
     result_out = asyncio.run(stream_generate(
         model_path, tokenizer, image_features, prompt, crop_mode,
-        image_size=IMAGE_SIZE,
-        base_size=BASE_SIZE,
-        min_crops=MIN_CROPS,
-        max_crops=MAX_CROPS,
+        image_size=cfg.image.image_size,
+        base_size=cfg.image.base_size,
+        min_crops=cfg.image.min_crops,
+        max_crops=cfg.image.max_crops,
     ))
     
     # Save results

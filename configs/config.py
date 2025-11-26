@@ -1,37 +1,53 @@
-# TODO: change modes
-# Tiny: base_size = 512, image_size = 512, crop_mode = False
-# Small: base_size = 640, image_size = 640, crop_mode = False
-# Base: base_size = 1024, image_size = 1024, crop_mode = False
-# Large: base_size = 1280, image_size = 1280, crop_mode = False
-# Gundam: base_size = 1024, image_size = 640, crop_mode = True
+"""
+Configuration file - plain Python variables and dicts (like mmdet3d).
+This file should only contain variable definitions, no classes or functions.
+"""
 
-BASE_SIZE = 1024
-IMAGE_SIZE = 640
-CROP_MODE = True
-MIN_CROPS= 2
-MAX_CROPS= 6 # max:9; If your GPU memory is small, it is recommended to set it to 6.
-MAX_CONCURRENCY = 100 # If you have limited GPU memory, lower the concurrency count.
-NUM_WORKERS = 64 # image pre-process (resize/padding) workers 
-PRINT_NUM_VIS_TOKENS = False
-SKIP_REPEAT = True
-MODEL_PATH = './weights/DeepSeek-OCR' # change to your model path, defaults to local weights folder
+# Model configuration
+model = dict(
+    path='./weights/DeepSeek-OCR',  # Model weights path
+)
 
-# TODO: change INPUT_PATH
-# .pdf: run_dpsk_ocr_pdf.py; 
-# .jpg, .png, .jpeg: run_dpsk_ocr_image.py; 
-# Omnidocbench images path: run_dpsk_ocr_eval_batch.py
+# Image processing configuration
+image = dict(
+    base_size=1024,
+    image_size=640,
+    crop_mode=True,
+    min_crops=2,
+    max_crops=6,  # max:9; If your GPU memory is small, it is recommended to set it to 6.
+)
 
-INPUT_PATH = '' 
-OUTPUT_PATH = ''
+# Processing configuration
+processing = dict(
+    max_concurrency=100,  # If you have limited GPU memory, lower the concurrency count.
+    num_workers=64,  # image pre-process (resize/padding) workers
+    print_num_vis_tokens=False,
+    skip_repeat=True,
+)
 
-PROMPT = '<image>\n<|grounding|>Convert the document to markdown.'
-# PROMPT = '<image>\nFree OCR.'
-# TODO commonly used prompts
-# document: <image>\n<|grounding|>Convert the document to markdown.
-# other image: <image>\n<|grounding|>OCR this image.
-# without layouts: <image>\nFree OCR.
-# figures in document: <image>\nParse the figure.
-# general: <image>\nDescribe this image in detail.
-# rec: <image>\nLocate <|ref|>xxxx<|/ref|> in the image.
-# '先天下之忧而忧'
-# .......
+# Input/Output paths
+paths = dict(
+    input='',  # Input file path (.pdf, .jpg, .png, .jpeg)
+    output='',  # Output directory path
+)
+
+# Prompt configuration
+prompt = dict(
+    default='<image>\n<|grounding|>Convert the document to markdown.',
+    # Other commonly used prompts:
+    # document: '<image>\n<|grounding|>Convert the document to markdown.'
+    # other image: '<image>\n<|grounding|>OCR this image.'
+    # without layouts: '<image>\nFree OCR.'
+    # figures in document: '<image>\nParse the figure.'
+    # general: '<image>\nDescribe this image in detail.'
+    # rec: '<image>\nLocate <|ref|>xxxx<|/ref|> in the image.'
+)
+
+# Mode presets (TODO: change modes)
+modes = dict(
+    tiny=dict(base_size=512, image_size=512, crop_mode=False),
+    small=dict(base_size=640, image_size=640, crop_mode=False),
+    base=dict(base_size=1024, image_size=1024, crop_mode=False),
+    large=dict(base_size=1280, image_size=1280, crop_mode=False),
+    gundam=dict(base_size=1024, image_size=640, crop_mode=True),
+)
