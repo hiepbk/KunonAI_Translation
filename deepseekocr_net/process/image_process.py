@@ -116,8 +116,8 @@ class DeepseekOCRProcessor(ProcessorMixin):
 
     def __init__(
         self,
-        model_path: str = None,
         tokenizer: LlamaTokenizerFast = None,
+        cfg=None,
         image_size: int = 640,
         base_size: int = 1024,
         min_crops: int = 2,
@@ -136,22 +136,45 @@ class DeepseekOCRProcessor(ProcessorMixin):
         ignore_id: int = -100,
         **kwargs,
     ):
-        # If cfg is provided, use it to get model_path and download/load tokenizer
-        if model_path is not None:
-            # Convert relative path to absolute (relative to current working directory)
-            if not os.path.isabs(model_path):
-                model_path = os.path.abspath(model_path)
-            
-            # Download model if needed
-            self._ensure_model_downloaded(model_path)
-            
-            # Load tokenizer from model_path
-            print(f"Loading tokenizer from: {model_path}")
-            tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, local_files_only=True)
-            print(f"✓ Tokenizer loaded")
-        
+        # Determine model path (if needed) when tokenizer is not provided.
+        download_path = None
+        if cfg is not None:
+            download_path = cfg.model.path
+            if not os.path.isabs(download_path):
+                download_path = os.path.abspath(download_path)
+        elif tokenizer is None:
+            # Fall back to MODEL_PATH constant if available
+            try:
+                from configs.config import MODEL_PATH
+                download_path = MODEL_PATH
+                if not os.path.isabs(download_path):
+                    download_path = os.path.abspath(download_path)
+            except ImportError:
+                download_path = None
+
+        # If tokenizer isn't provided, download/load from download_path.
         if tokenizer is None:
-            raise ValueError("tokenizer must be provided to DeepseekOCRProcessor (either directly or via cfg)")
+            if download_path is None:
+                raise ValueError(
+                    "tokenizer must be provided to DeepseekOCRProcessor "
+                    "(provide tokenizer instance, cfg with model.path, or set MODEL_PATH)."
+                )
+
+            self._ensure_model_downloaded(download_path)
+            print(f"Loading tokenizer from: {download_path}")
+            tokenizer = AutoTokenizer.from_pretrained(
+                download_path, trust_remote_code=True, local_files_only=True
+            )
+            print("✓ Tokenizer loaded")
+
+            if cfg is not None:
+                image_size = cfg.image.image_size
+                base_size = cfg.image.base_size
+                min_crops = cfg.image.min_crops
+                max_crops = cfg.image.max_crops
+
+        if tokenizer is None:
+            raise ValueError("tokenizer must be provided to DeepseekOCRProcessor")
 
         # self.candidate_resolutions = candidate_resolutions # placeholder no use
         self.image_size = image_size

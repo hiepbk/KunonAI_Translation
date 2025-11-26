@@ -229,12 +229,7 @@ def main():
     print("Building components...")
     print("=" * 50)
     
-    processor = DeepseekOCRProcessor(model_path=cfg.model.path,
-                                     tokenizer=None, # we should give None then automatically download the tokenizer
-                                     image_size=cfg.image.image_size,
-                                     base_size=cfg.image.base_size,
-                                     min_crops=cfg.image.min_crops,
-                                     max_crops=cfg.image.max_crops)
+    processor = DeepseekOCRProcessor(cfg=cfg)
     engine = build_engine(cfg)
     sampling_params = build_sampling_params()
     
