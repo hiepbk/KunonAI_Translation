@@ -1522,8 +1522,9 @@ def process_pdf_page_ocr_only(page, ocr, ocr_type='paddle', ocr_ar=None, debug=F
             # PaddleOCR 사용
             if ocr_ar is not None:
                 # 두 OCR 모두 실행 (한국어+영어와 중국어/아랍어+영어)
-                result_ko = ocr.ocr(tmp_path, cls=True)
-                result_other = ocr_ar.ocr(tmp_path, cls=True)
+                # cls=False for faster processing (angle classifier already enabled in initialization)
+                result_ko = ocr.ocr(tmp_path, cls=False)
+                result_other = ocr_ar.ocr(tmp_path, cls=False)
                 
                 # 두 결과를 합치기 (중복 제거를 위해 bbox 기반으로)
                 all_rec_texts = []
@@ -1736,8 +1737,8 @@ def process_pdf_page_ocr_only(page, ocr, ocr_type='paddle', ocr_ar=None, debug=F
                         except Exception as e:
                             pass
             else:
-                # 단일 OCR 사용
-                result = ocr.ocr(tmp_path, cls=True)
+                # 단일 OCR 사용 (OCR-only mode: faster, no need for cls since angle classifier is enabled in init)
+                result = ocr.ocr(tmp_path, cls=False)
                 
                 # PaddleOCR 결과 파싱
                 texts, bboxes, scores = parse_paddleocr_result(result)
@@ -3640,13 +3641,19 @@ elif OCR_ENGINE == 'paddle':
         # 모든 언어 번역: 한국어 OCR, 중국어 OCR, 아랍어 OCR 모두 사용
         print("  → 한국어 OCR 모델 사용 (한국어, 영어 인식)")
         ocr = PaddleOCR(
-            use_angle_cls=False,
+            use_angle_cls=True,  # Enable angle classifier for better accuracy
             use_gpu=True,
             show_log=False,
             use_doc_orientation_classify=True,
             use_doc_unwarping=False,
             use_textline_orientation=False,
-            lang='korean'  # 한국어 모드 (한국어, 영어 인식)
+            lang='korean',  # 한국어 모드 (한국어, 영어 인식)
+            det_db_unclip_ratio=2.0,  # Text region expansion ratio (better for longer text)
+            det_limit_side_len=1920,  # Image size limit (higher = more accurate)
+            max_text_length=50,  # Maximum text length (default 25, increase for longer sentences)
+            rec_batch_num=6,  # Recognition batch size (faster processing)
+            det_db_thresh=0.3,  # Text detection threshold (lower = detect more text)
+            det_db_box_thresh=0.6  # Text box threshold
         )
         print("  → 중국어 OCR 모델 사용 (한자, 영어 인식)")
         ocr_ch = PaddleOCR(
@@ -3747,8 +3754,9 @@ if OCR_VIEW_MODE:
             pbar.set_description(f"페이지 {display_page_num}/{total_pages} 처리 중")
             
             # 페이지 처리 (OCR만 수행)
+            # OCR-only mode: use only main OCR for speed (no need for multiple OCR instances)
             pbar.set_postfix({"단계": "OCR 수행 중"})
-            original_img, ocr_img = process_pdf_page_ocr_only(page, ocr, ocr_type=OCR_ENGINE, ocr_ar=ocr_ar, debug=False, page_num=display_page_num)
+            original_img, ocr_img = process_pdf_page_ocr_only(page, ocr, ocr_type=OCR_ENGINE, ocr_ar=None, debug=False, page_num=display_page_num)
             
             # 두 이미지를 나란히 붙이기 (왼쪽: 원본, 오른쪽: OCR 결과)
             pbar.set_postfix({"단계": "이미지 결합 중"})
