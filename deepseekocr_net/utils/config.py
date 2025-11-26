@@ -84,6 +84,52 @@ class Config:
             other = other._cfg_dict
         self._cfg_dict.update(other)
     
+    def merge_from_dict(self, options: Dict[str, Any]) -> None:
+        """Merge config from a dict, supporting nested keys with dot notation.
+        
+        Example:
+            cfg.merge_from_dict({'model.path': './new/path', 'image.image_size': 1024})
+        """
+        for key, value in options.items():
+            if '.' in key:
+                # Handle nested keys like 'model.path'
+                keys = key.split('.')
+                d = self._cfg_dict
+                for k in keys[:-1]:
+                    if k not in d:
+                        d[k] = {}
+                    d = d[k]
+                d[keys[-1]] = value
+            else:
+                self._cfg_dict[key] = value
+    
+    def merge_from_list(self, options: list) -> None:
+        """Merge config from a list of key-value pairs (like argparse).
+        
+        Example:
+            cfg.merge_from_list(['model.path', './new/path', 'image.image_size', '1024'])
+        """
+        assert len(options) % 2 == 0, f"Options list must have even number of elements, got {len(options)}"
+        options_dict = {}
+        for i in range(0, len(options), 2):
+            key = options[i]
+            value = options[i + 1]
+            # Try to convert value to appropriate type
+            try:
+                # Try int
+                if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+                    value = int(value)
+                # Try float
+                elif '.' in value and value.replace('.', '').replace('-', '').isdigit():
+                    value = float(value)
+                # Try bool
+                elif value.lower() in ['true', 'false']:
+                    value = value.lower() == 'true'
+            except:
+                pass
+            options_dict[key] = value
+        self.merge_from_dict(options_dict)
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to plain dict."""
         return self._convert_to_dict(self._cfg_dict)
@@ -137,6 +183,59 @@ class Config:
             raise ValueError(f"Unsupported config file format: {suffix}")
         
         return cls(cfg_dict, filename=str(filepath))
+    
+    @staticmethod
+    def parse_cfg_options(cfg_options: list) -> Dict[str, Any]:
+        """Parse cfg_options list into dict (like mmdet3d).
+        
+        Args:
+            cfg_options: List of key=value strings, e.g., ['model.path=./new/path', 'image.image_size=1024']
+            
+        Returns:
+            Dict with parsed options
+        """
+        options = {}
+        for opt in cfg_options:
+            if '=' not in opt:
+                raise ValueError(f"Invalid cfg-option format: {opt}. Expected 'key=value'")
+            key, value = opt.split('=', 1)
+            # Try to convert value to appropriate type
+            try:
+                # Try int
+                if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+                    value = int(value)
+                # Try float
+                elif '.' in value and value.replace('.', '').replace('-', '').replace('e', '').replace('E', '').isdigit():
+                    value = float(value)
+                # Try bool
+                elif value.lower() in ['true', 'false']:
+                    value = value.lower() == 'true'
+                # Try list (comma-separated)
+                elif ',' in value:
+                    value = [v.strip() for v in value.split(',')]
+            except:
+                pass
+            options[key] = value
+        return options
+    
+    def merge_from_dict(self, options: Dict[str, Any]) -> None:
+        """Merge config from a dict, supporting nested keys with dot notation.
+        
+        Example:
+            cfg.merge_from_dict({'model.path': './new/path', 'image.image_size': 1024})
+        """
+        for key, value in options.items():
+            if '.' in key:
+                # Handle nested keys like 'model.path'
+                keys = key.split('.')
+                d = self._cfg_dict
+                for k in keys[:-1]:
+                    if k not in d:
+                        d[k] = {}
+                    d = d[k]
+                d[keys[-1]] = value
+            else:
+                self._cfg_dict[key] = value
     
     def __repr__(self) -> str:
         """String representation."""

@@ -27,7 +27,7 @@ from tqdm import tqdm
 from deepseekocr_net.deepseek_ocr import DeepseekOCRForCausalLM
 from deepseekocr_net.process.ngram_norepeat import NoRepeatNGramLogitsProcessor
 from deepseekocr_net.process.image_process import DeepseekOCRProcessor
-from configs import cfg
+from configs import Config
 
 # Register the model
 ModelRegistry.register_model("DeepseekOCRForCausalLM", DeepseekOCRForCausalLM)
@@ -261,22 +261,31 @@ def main():
     """Main inference function."""
     args = parse_arguments()
     
-    # Determine model path (argument > config > default)
-    model_path = args.model_path or cfg.model.path or './weights/DeepSeek-OCR'
+    # Load config (like mmdet3d)
+    from pathlib import Path
+    config_path = Path(args.config)
+    if not config_path.is_absolute():
+        # Make relative to project root
+        config_path = Path(__file__).parent.parent / config_path
+    cfg = Config.from_file(str(config_path))
     
-    # Determine input path (argument > config)
-    input_path = args.input_path or cfg.paths.input
+    # Merge cfg-options if provided
+    if args.cfg_options is not None:
+        # Flatten the list of lists
+        cfg_options = []
+        for opt_list in args.cfg_options:
+            cfg_options.extend(opt_list)
+        options_dict = Config.parse_cfg_options(cfg_options)
+        cfg.merge_from_dict(options_dict)
+    
+    # Get values from merged config
+    model_path = cfg.model.path or './weights/DeepSeek-OCR'
+    input_path = cfg.paths.input
     if not input_path:
-        raise ValueError("Input path must be provided via --input or set in config")
-    
-    # Determine output path (argument > config > default)
-    output_path = args.output_path or cfg.paths.output or './results'
-    
-    # Determine prompt (argument > config > default)
-    prompt = args.prompt or cfg.prompt.default or '<image>\n<|grounding|>Convert the document to markdown.'
-    
-    # Determine crop mode (argument > config > default)
-    crop_mode = args.crop_mode if args.crop_mode is not None else cfg.image.crop_mode
+        raise ValueError("Input path must be provided via --cfg-options paths.input=... or set in config")
+    output_path = cfg.paths.output or './results'
+    prompt = cfg.prompt.default or '<image>\n<|grounding|>Convert the document to markdown.'
+    crop_mode = cfg.image.crop_mode
     
     # Create output directories
     os.makedirs(output_path, exist_ok=True)
@@ -289,13 +298,11 @@ def main():
         raise ValueError(f"Failed to load image from {input_path}")
     image = image.convert('RGB')
     
-    # Get model parameters from config (using dot notation)
-    
     # Create tokenizer
     print(f"Loading tokenizer from: {model_path}")
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     
-    # Create processor with tokenizer and parameters
+    # Create processor with tokenizer and parameters (from merged config)
     processor = DeepseekOCRProcessor(
         tokenizer=tokenizer,
         image_size=cfg.image.image_size,

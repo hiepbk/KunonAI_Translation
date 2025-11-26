@@ -1,8 +1,7 @@
 """
-Config module - provides Config class and loads default config.
+Config module - provides Config class.
+Config files should be loaded explicitly in inference pipelines.
 """
 from deepseekocr_net.utils.config import Config
-from . import config
 
-# Load default config from config.py
-cfg = Config.from_file(__file__.replace('__init__.py', 'config.py'))
+__all__ = ['Config']
