@@ -1,10 +1,12 @@
 import math
+import os
+from pathlib import Path
 from typing import List, Tuple
 
 import torch
 import torchvision.transforms as T
 from PIL import Image, ImageOps
-from transformers import AutoProcessor, BatchFeature, LlamaTokenizerFast
+from transformers import AutoProcessor, AutoTokenizer, BatchFeature, LlamaTokenizerFast
 from transformers.processing_utils import ProcessorMixin
 # Removed config imports - parameters should be passed during initialization
 
@@ -114,6 +116,7 @@ class DeepseekOCRProcessor(ProcessorMixin):
 
     def __init__(
         self,
+        cfg=None,
         tokenizer: LlamaTokenizerFast = None,
         image_size: int = 640,
         base_size: int = 1024,
@@ -133,8 +136,23 @@ class DeepseekOCRProcessor(ProcessorMixin):
         ignore_id: int = -100,
         **kwargs,
     ):
+        # If cfg is provided, use it to get model_path and download/load tokenizer
+        if cfg is not None:
+            model_path = cfg.model.path
+            # Convert relative path to absolute (relative to current working directory)
+            if not os.path.isabs(model_path):
+                model_path = os.path.abspath(model_path)
+            
+            # Download model if needed
+            self._ensure_model_downloaded(model_path)
+            
+            # Load tokenizer from model_path
+            print(f"Loading tokenizer from: {model_path}")
+            tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, local_files_only=True)
+            print(f"✓ Tokenizer loaded")
+        
         if tokenizer is None:
-            raise ValueError("tokenizer must be provided to DeepseekOCRProcessor")
+            raise ValueError("tokenizer must be provided to DeepseekOCRProcessor (either directly or via cfg)")
 
         # self.candidate_resolutions = candidate_resolutions # placeholder no use
         self.image_size = image_size
@@ -193,7 +211,34 @@ class DeepseekOCRProcessor(ProcessorMixin):
             tokenizer,
             **kwargs,
         )
-
+    
+    def _ensure_model_downloaded(self, model_path: str) -> None:
+        """Download DeepSeek-OCR model (weights + tokenizer + code) to local path if not exists.
+        
+        Args:
+            model_path: Path to model directory (local)
+        """
+        # Check if model weights exist
+        has_weights = False
+        if os.path.exists(model_path) and os.path.isdir(model_path):
+            safetensors_files = list(Path(model_path).glob("*.safetensors"))
+            if safetensors_files:
+                has_weights = True
+        
+        if not has_weights:
+            # Download everything (weights + tokenizer + code) from same source
+            from huggingface_hub import snapshot_download
+            hf_model_id = 'deepseek-ai/DeepSeek-OCR'
+            print(f"Model not found locally ({model_path}), downloading from: {hf_model_id}")
+            print("Downloading everything (weights + tokenizer + code files, ~6.67GB)...")
+            os.makedirs(model_path, exist_ok=True)
+            
+            snapshot_download(
+                repo_id=hf_model_id,
+                local_dir=model_path,
+                local_dir_use_symlinks=False,
+            )
+            print(f"✓ Model downloaded to: {model_path}")
 
     
 

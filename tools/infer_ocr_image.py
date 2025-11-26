@@ -39,142 +39,20 @@ from .utils import (
 ModelRegistry.register_model("DeepseekOCRForCausalLM", DeepseekOCRForCausalLM)
 
 
-def build_tokenizer(model_path: str, cfg) -> AutoTokenizer:
-    """Build tokenizer from model path.
-    
-    AutoTokenizer.from_pretrained() expects:
-    - A directory path containing tokenizer files:
-      * tokenizer.json (or tokenizer_config.json) - main tokenizer configuration
-      * vocab.json or vocab.txt - vocabulary file
-      * special_tokens_map.json - special tokens mapping
-      * merges.txt (for BPE tokenizers)
-      * Other tokenizer-related JSON/txt files
-    - OR a HuggingFace model ID (string like 'deepseek-ai/DeepSeek-OCR')
-    
-    Args:
-        model_path: Path to model directory (local) or HuggingFace model ID
-        cfg: Config object
-        
-    Returns:
-        AutoTokenizer instance
-    """
-    print(f"Loading tokenizer from: {model_path}")
-    
-    # Check if local path exists and has tokenizer files
-    if os.path.exists(model_path) and os.path.isdir(model_path):
-        # Check if essential tokenizer files exist
-        tokenizer_files = [
-            'tokenizer.json', 
-            'tokenizer_config.json', 
-            'vocab.json', 
-            'vocab.txt',
-            'special_tokens_map.json'
-        ]
-        has_tokenizer_files = any(os.path.exists(os.path.join(model_path, f)) for f in tokenizer_files)
-        
-        if has_tokenizer_files:
-            tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, local_files_only=True)
-            print(f"✓ Tokenizer loaded from local path: {model_path}")
-            return tokenizer
-        else:
-            print(f"⚠ Local path exists but missing tokenizer files, will download...")
-    
-    # Download tokenizer files to local weights folder (not HuggingFace cache)
-    from huggingface_hub import snapshot_download
-    hf_model_id = 'deepseek-ai/DeepSeek-OCR'
-    print(f"Downloading tokenizer files to: {model_path}")
-    os.makedirs(model_path, exist_ok=True)
-    
-    # Download only tokenizer-related files (not model weights)
-    print("Downloading tokenizer files (tokenizer.json, vocab files, configs, etc.)...")
-    snapshot_download(
-        repo_id=hf_model_id,
-        local_dir=model_path,
-        local_dir_use_symlinks=False,
-        allow_patterns=[
-            "tokenizer*.json",      # tokenizer.json, tokenizer_config.json
-            "vocab.json",           # vocabulary file
-            "vocab.txt",            # vocabulary file (alternative)
-            "special_tokens_map.json",  # special tokens
-            "merges.txt",           # BPE merges (if applicable)
-            "*.json",               # Other JSON config files
-        ],
-        ignore_patterns=[
-            "*.safetensors",        # Model weights
-            "*.bin",                # Model weights
-            "*.pt",                 # Model weights
-            "*.pth",                # Model weights
-            "*.onnx",               # Model weights
-            "*.h5",                 # Model weights
-            "*.ckpt",               # Model weights
-            "model*.json",          # Model config (not tokenizer)
-            "config.json",          # Model config (not tokenizer)
-        ],
-        
-    )
-    
-    # Load tokenizer from local path
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, local_files_only=True)
-    print(f"✓ Tokenizer downloaded and loaded from: {model_path}")
-    
-    return tokenizer
-
-
-def build_processor(tokenizer: AutoTokenizer, cfg) -> DeepseekOCRProcessor:
-    """Build image processor with tokenizer and config parameters.
-    
-    Args:
-        tokenizer: AutoTokenizer instance
-        cfg: Config object
-        
-    Returns:
-        DeepseekOCRProcessor instance
-    """
-    processor = DeepseekOCRProcessor(
-        tokenizer=tokenizer,
-        image_size=cfg.image.image_size,
-        base_size=cfg.image.base_size,
-        min_crops=cfg.image.min_crops,
-        max_crops=cfg.image.max_crops,
-    )
-    return processor
 
 
 def build_engine(model_path: str, cfg) -> AsyncLLMEngine:
     """Build vLLM async engine.
     
     Args:
-        model_path: Path to model directory (local) or HuggingFace model ID
+        model_path: Path to model directory (local) - should already have model files
         cfg: Config object
         
     Returns:
         AsyncLLMEngine instance
     """
-    # Check if local model path exists and has model files
-    has_local_model = False
-    if os.path.exists(model_path) and os.path.isdir(model_path):
-        # Check if model weights exist (safetensors files)
-        safetensors_files = list(Path(model_path).glob("*.safetensors"))
-        if safetensors_files:
-            has_local_model = True
-    
-    if not has_local_model:
-        # Download model (weights, tokenizer, code files) to local folder (not HuggingFace cache)
-        from huggingface_hub import snapshot_download
-        hf_model_id = 'deepseek-ai/DeepSeek-OCR'
-        print(f"Local model not found ({model_path}), downloading to: {model_path}")
-        os.makedirs(model_path, exist_ok=True)
-        
-        # Download all model files (weights, tokenizer, config, code)
-        print("Downloading model files (this may take a while)...")
-        snapshot_download(
-            repo_id=hf_model_id,
-            local_dir=model_path,
-            local_dir_use_symlinks=False,
-        )
-        print(f"✓ Model downloaded to: {model_path}")
-    
-    # Use local path for vLLM
+    # Model should already be downloaded by ensure_model_downloaded()
+    # Just use the local path for vLLM
     vllm_model_path = model_path
     
     engine_args = AsyncEngineArgs(
@@ -327,18 +205,15 @@ def main():
         cfg.merge_from_dict(options_dict)
     
     # Get values directly from merged config
-    tokenizer_path = cfg.model.tokenizer_path
-    ckpt_path = cfg.model.ckpt_path
+    model_path = cfg.model.path
     input_path = cfg.paths.input
     output_path = cfg.paths.output
     prompt = cfg.prompt.default
     crop_mode = cfg.image.crop_mode
     
     # Convert relative paths to absolute paths
-    if not os.path.isabs(tokenizer_path):
-        tokenizer_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, tokenizer_path))
-    if not os.path.isabs(ckpt_path):
-        ckpt_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, ckpt_path))
+    if not os.path.isabs(model_path):
+        model_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, model_path))
     if not os.path.isabs(input_path):
         input_path = os.path.abspath(os.path.join(Path(__file__).parent.parent, input_path))
     if not os.path.isabs(output_path):
@@ -349,12 +224,12 @@ def main():
     os.makedirs(f'{output_path}/images', exist_ok=True)
     
     # Build components
+    # DeepseekOCRProcessor will handle model download and tokenizer loading internally
     print("=" * 50)
     print("Building components...")
     print("=" * 50)
     
-    tokenizer = build_tokenizer(model_path, cfg)
-    processor = build_processor(tokenizer, cfg)
+    processor = DeepseekOCRProcessor(cfg=cfg)
     engine = build_engine(model_path, cfg)
     sampling_params = build_sampling_params()
     
