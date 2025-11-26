@@ -111,3 +111,10 @@ yarn-error.log*
 config.ini
 secrets.txt
 credentials.json
+
+# Model weights (too large for git)
+weights/
+*.safetensors
+*.bin
+*.pt
+*.pth
