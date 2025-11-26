@@ -16,14 +16,13 @@ if readme_path.exists():
         long_description = f.read()
 
 setup(
-    name="kunon-ai-translation",
+    name="KunonAI_Translation",
     version="0.1.0",
     description="DeepSeek OCR Translation Pipeline",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Your Name",
-    packages=find_packages(exclude=['tests', 'tests.*']),
-    package_dir={'': '.'},
+    packages=find_packages(exclude=['tests', 'tests.*', 'sample_data', 'weights', 'results']),
     python_requires=">=3.12",
     install_requires=requirements,
     include_package_data=True,
