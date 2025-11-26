@@ -7,6 +7,7 @@ import argparse
 import os
 import re
 from pathlib import Path
+from deepseekocr_net.utils.config import Config
 
 import torch
 if torch.version.cuda == '11.8':
@@ -27,7 +28,6 @@ from tqdm import tqdm
 from deepseekocr_net.deepseek_ocr import DeepseekOCRForCausalLM
 from deepseekocr_net.process.ngram_norepeat import NoRepeatNGramLogitsProcessor
 from deepseekocr_net.process.image_process import DeepseekOCRProcessor
-from configs import Config
 
 # Register the model
 ModelRegistry.register_model("DeepseekOCRForCausalLM", DeepseekOCRForCausalLM)
@@ -216,58 +216,55 @@ def parse_arguments():
     )
     
     parser.add_argument(
-        '--model-path',
+        '--config',
         type=str,
-        default=None,
-        help=f'Path to model weights (default: {cfg.model.path} or from config)'
+        default='configs/deepseek_ocr_image_config.py',
+        help='Config file path'
     )
     
     parser.add_argument(
-        '--input',
-        '--input-path',
-        type=str,
-        dest='input_path',
+        '--cfg-options',
+        nargs='+',
+        action='append',
         default=None,
-        help=f'Input image path (default: {cfg.paths.input} or from config)'
+        help='Override some settings in the used config, the key-value pair '
+             'in xxx=yyy format will be merged into config file. If the value to '
+             'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
+             'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
+             'Note that the quotation marks are necessary and that no white space '
+             'is allowed.'
     )
     
+    # Deprecated: --options (for backward compatibility)
     parser.add_argument(
-        '--output',
-        '--output-path',
-        type=str,
-        dest='output_path',
+        '--options',
+        nargs='+',
+        action='append',
         default=None,
-        help=f'Output directory path (default: {cfg.paths.output} or from config)'
+        help='Deprecated in favor of --cfg-options'
     )
     
-    parser.add_argument(
-        '--prompt',
-        type=str,
-        default=None,
-        help=f'Prompt for OCR (default: {cfg.prompt.default} or from config)'
-    )
+    args = parser.parse_args()
     
-    parser.add_argument(
-        '--crop-mode',
-        action='store_true',
-        default=None,
-        help=f'Enable crop mode (default: {cfg.image.crop_mode} from config)'
-    )
+    # Handle deprecated --options
+    if args.options and args.cfg_options:
+        raise ValueError(
+            '--options and --cfg-options cannot be both specified, '
+            '--options is deprecated in favor of --cfg-options')
+    if args.options:
+        import warnings
+        warnings.warn('--options is deprecated in favor of --cfg-options')
+        args.cfg_options = args.options
     
-    return parser.parse_args()
+    return args
 
 
 def main():
     """Main inference function."""
     args = parse_arguments()
     
-    # Load config (like mmdet3d)
-    from pathlib import Path
-    config_path = Path(args.config)
-    if not config_path.is_absolute():
-        # Make relative to project root
-        config_path = Path(__file__).parent.parent / config_path
-    cfg = Config.from_file(str(config_path))
+    # load the config file from path args.config
+    cfg = Config.from_file(args.config)
     
     # Merge cfg-options if provided
     if args.cfg_options is not None:
@@ -278,13 +275,11 @@ def main():
         options_dict = Config.parse_cfg_options(cfg_options)
         cfg.merge_from_dict(options_dict)
     
-    # Get values from merged config
-    model_path = cfg.model.path or './weights/DeepSeek-OCR'
+    # Get values directly from merged config
+    model_path = cfg.model.path
     input_path = cfg.paths.input
-    if not input_path:
-        raise ValueError("Input path must be provided via --cfg-options paths.input=... or set in config")
-    output_path = cfg.paths.output or './results'
-    prompt = cfg.prompt.default or '<image>\n<|grounding|>Convert the document to markdown.'
+    output_path = cfg.paths.output
+    prompt = cfg.prompt.default
     crop_mode = cfg.image.crop_mode
     
     # Create output directories

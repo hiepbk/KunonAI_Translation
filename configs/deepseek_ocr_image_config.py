@@ -27,8 +27,8 @@ processing = dict(
 
 # Input/Output paths
 paths = dict(
-    input='',  # Input file path (.pdf, .jpg, .png, .jpeg)
-    output='',  # Output directory path
+    input='data/test_1.png',  # Input file path (.pdf, .jpg, .png, .jpeg)
+    output='results/test_1_result.md',  # Output directory path
 )
 
 # Prompt configuration
