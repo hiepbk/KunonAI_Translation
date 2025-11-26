@@ -27,7 +27,7 @@ from deepseekocr_net.utils.config import Config
 from deepseekocr_net.deepseek_ocr import DeepseekOCRForCausalLM
 from deepseekocr_net.process.ngram_norepeat import NoRepeatNGramLogitsProcessor
 from deepseekocr_net.process.image_process import DeepseekOCRProcessor
-from tools.utils import (
+from .utils import (
     load_image,
     re_match,
     process_image_with_refs,
