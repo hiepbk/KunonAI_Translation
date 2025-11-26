@@ -56,19 +56,20 @@ def build_engine(cfg) -> AsyncLLMEngine:
     
     engine_args = AsyncEngineArgs(
         model=vllm_model_path,
-        hf_overrides={"architectures": ["DeepseekOCRForCausalLM"]},
-        block_size=256,
-        max_model_len=8192,
-        enforce_eager=False,
-        trust_remote_code=True,  
-        tensor_parallel_size=1,
-        gpu_memory_utilization=0.75,
+        hf_overrides=cfg.engine.hf_overrides,
+        block_size=cfg.engine.block_size,
+        max_model_len=cfg.engine.max_model_len,
+        enforce_eager=cfg.engine.enforce_eager,
+        trust_remote_code=cfg.engine.trust_remote_code,
+        tensor_parallel_size=cfg.engine.tensor_parallel_size,
+        gpu_memory_utilization=cfg.engine.gpu_memory_utilization,
         # Pass processor parameters through mm_processor_kwargs
         mm_processor_kwargs={
             'image_size': cfg.image.image_size,
             'base_size': cfg.image.base_size,
             'min_crops': cfg.image.min_crops,
             'max_crops': cfg.image.max_crops,
+            'print_num_vis_tokens': cfg.processing.print_num_vis_tokens,
         },
     )
     engine = AsyncLLMEngine.from_engine_args(engine_args)

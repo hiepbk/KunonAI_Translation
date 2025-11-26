@@ -252,8 +252,9 @@ class DeepseekOCRMultiModalProcessor(
                 num_image_tokens = self.info.get_num_image_tokens(
                     image_width=width,
                     image_height=height,
-                    # flag = True,
-                    cropping=CROP_MODE,
+                    # Note that we remove the constaint by using config
+                    # so need to verify whether get from self.info is correct or not
+                    cropping=getattr(self.info, "crop_mode", True),
                 )
             return [image_token_id] * num_image_tokens
 
@@ -443,7 +444,7 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
                     global_features = torch.cat((global_features_2[:, 1:], global_features_1.flatten(2).permute(0, 2, 1)), dim=-1) 
                     global_features = self.projector(global_features)
 
-                    if PRINT_NUM_VIS_TOKENS:
+                    if getattr(self.info, "print_num_vis_tokens", False):
                         print('=====================')
                         print('BASE: ', global_features.shape)
                         print('PATCHES: ', local_features.shape)
@@ -480,7 +481,7 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
                     global_features = torch.cat((global_features_2[:, 1:], global_features_1.flatten(2).permute(0, 2, 1)), dim=-1) 
                     global_features = self.projector(global_features)
 
-                    if PRINT_NUM_VIS_TOKENS:
+                    if getattr(self.info, "print_num_vis_tokens", False):
                         print('=====================')
                         print('BASE: ', global_features.shape)
                         print('NO PATCHES')

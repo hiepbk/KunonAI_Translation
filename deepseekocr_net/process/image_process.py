@@ -233,7 +233,7 @@ class DeepseekOCRProcessor(ProcessorMixin):
             tokenizer,
             **kwargs,
         )
-    
+
     def _ensure_model_downloaded(self, model_path: str) -> None:
         """Download DeepSeek-OCR model (weights + tokenizer + code) to local path if not exists.
         

@@ -8,6 +8,19 @@ model = dict(
     path='./weights/DeepSeek-OCR',  # Model path (contains both tokenizer and weights)
 )
 
+# vLLM engine configuration
+engine = dict(
+    hf_overrides=dict(
+        architectures=['DeepseekOCRForCausalLM'],
+    ),
+    block_size=256,
+    max_model_len=8192,
+    enforce_eager=False,
+    trust_remote_code=True,
+    tensor_parallel_size=1,
+    gpu_memory_utilization=0.75,
+)
+
 # Image processing configuration
 image = dict(
     base_size=1024,
