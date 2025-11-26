@@ -1,41 +1,4 @@
 import os
-from pathlib import Path
-from pathlib import Path
-# Weights folder - automatically relative to project root
-_PROJECT_ROOT = Path(__file__).parent.parent
-WEIGHTS_DIR = _PROJECT_ROOT / "weights"
-WEIGHTS_DIR.mkdir(exist_ok=True)
-
-# Strategy: Everything goes to weights folder, NEVER use HuggingFace cache in /home
-LOCAL_MODEL_PATH = WEIGHTS_DIR / "DeepSeek-OCR"
-HF_MODEL_ID = 'deepseek-ai/DeepSeek-OCR'
-
-def has_model_weights(path):
-    """Check if model weights (.safetensors) exist"""
-    if not path.exists():
-        return False
-    safetensors = list(path.glob("model*.safetensors"))
-    return len(safetensors) > 0
-
-# Download model weights if not exists (only weights, no code files)
-if not has_model_weights(LOCAL_MODEL_PATH):
-    print(f"Model weights not found. Downloading '{HF_MODEL_ID}' to '{LOCAL_MODEL_PATH}'...")
-    print("Downloading only weights (.safetensors) and config files (.json) - NO code files")
-    LOCAL_MODEL_PATH.mkdir(parents=True, exist_ok=True)  # Create model folder if not exists
-    from huggingface_hub import snapshot_download
-    try:
-        snapshot_download(
-            repo_id=HF_MODEL_ID,
-            local_dir=str(LOCAL_MODEL_PATH),
-            local_dir_use_symlinks=False,  # Copy files, don't use symlinks
-            allow_patterns=["*.safetensors", "*.json", "*.txt", "*.md"],
-            ignore_patterns=["*.py", "*.jpg", "*.png", "*.jpeg", "assets/**", "*.ipynb"],
-        )
-        print(f"✓ Model weights downloaded to: {LOCAL_MODEL_PATH}")
-    except Exception as e:
-        print(f"✗ Download failed: {e}")
-        raise
-
 import fitz
 import img2pdf
 import io
@@ -51,21 +14,21 @@ os.environ['VLLM_USE_V1'] = '0'
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 
-from configs.config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, SKIP_REPEAT, MAX_CONCURRENCY, NUM_WORKERS, CROP_MODE
+from config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, SKIP_REPEAT, MAX_CONCURRENCY, NUM_WORKERS, CROP_MODE
 
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
-from deepseekocr_net.deepseek_ocr import DeepseekOCRForCausalLM
+from deepseek_ocr import DeepseekOCRForCausalLM
 
 from vllm.model_executor.models.registry import ModelRegistry
 
 from vllm import LLM, SamplingParams
-from deepseekocr_net.process.ngram_norepeat import NoRepeatNGramLogitsProcessor
-from deepseekocr_net.process.image_process import DeepseekOCRProcessor
+from process.ngram_norepeat import NoRepeatNGramLogitsProcessor
+from process.image_process import DeepseekOCRProcessor
 
 ModelRegistry.register_model("DeepseekOCRForCausalLM", DeepseekOCRForCausalLM)
 
-# MODEL_PATH is now guaranteed to be a local path (downloaded by config.py if needed)
+
 llm = LLM(
     model=MODEL_PATH,
     hf_overrides={"architectures": ["DeepseekOCRForCausalLM"]},
@@ -364,4 +327,3 @@ if __name__ == "__main__":
 
 
     pil_to_pdf_img2pdf(draw_images, pdf_out_path)
-
