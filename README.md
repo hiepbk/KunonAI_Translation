@@ -57,6 +57,7 @@
 
 ## Contents
 - [Install](#install)
+- [Project Structure](#project-structure)
 - [vLLM Inference](#vllm-inference)
 - [Transformers Inference](#transformers-inference)
   
@@ -86,23 +87,140 @@ pip install flash-attn==2.7.3 --no-build-isolation
 ```
 **Note:** if you want vLLM and transformers codes to run in the same environment, you don't need to worry about this installation error like: vllm 0.8.5+cu118 requires transformers>=4.51.1
 
+## Project Structure
+
+This project has been reorganized into a modular, mmdet3d-like architecture for better maintainability and flexibility.
+
+### Architecture Overview
+
+```
+KunonAI_Translation/
+├── deepseekocr_net/          # Core model package (general, reusable)
+│   ├── deepseek_ocr.py       # DeepseekOCRForCausalLM model
+│   ├── process/              # Image processing modules
+│   │   ├── image_process.py  # DeepseekOCRProcessor (handles tokenizer download/loading)
+│   │   └── ngram_norepeat.py # Logits processors
+│   └── utils/
+│       └── config.py         # Config class (mmdet3d-like, dot notation)
+├── configs/                  # Configuration files
+│   └── deepseek_ocr_image_config.py  # Plain Python config (dicts/variables)
+├── tools/                    # Inference pipelines and utilities
+│   ├── infer_ocr_image.py    # Main inference pipeline (modular, builder pattern)
+│   ├── utils.py              # Utility functions (load_image, draw_bbox, etc.)
+│   └── run_dpsk_ocr_*.py     # Legacy scripts (for reference)
+└── weights/                  # Model weights (downloaded automatically)
+```
+
+### Key Design Principles
+
+1. **Modular Architecture**: The `deepseekocr_net` package is general and reusable, with no direct imports from `configs/`. All parameters are passed explicitly.
+
+2. **mmdet3d-like Config System**: 
+   - Config files are plain Python files with variables and dicts
+   - `Config` class provides dot notation access (e.g., `cfg.model.path`)
+   - Supports command-line argument merging via `--cfg-options`
+
+3. **Smart Tokenizer Handling**:
+   - `DeepseekOCRProcessor` automatically handles tokenizer download/loading
+   - **If tokenizer is provided** (e.g., by vLLM): uses it directly, no download
+   - **If tokenizer is not provided**: downloads model from `cfg.model.path` and loads tokenizer
+   - Model and tokenizer are downloaded from the same source once to avoid redundancy
+
+4. **Builder Pattern**: The inference pipeline uses builder functions (`build_processor`, `build_engine`, `build_sampling_params`) for clean, modular code.
+
+### Configuration System
+
+The config system mimics mmdet3d:
+
+```python
+# configs/deepseek_ocr_image_config.py
+model = dict(
+    path='./weights/DeepSeek-OCR',  # Single path for model + tokenizer
+)
+
+image = dict(
+    base_size=1024,
+    image_size=640,
+    crop_mode=True,
+    min_crops=2,
+    max_crops=6,
+)
+```
+
+Usage in code:
+```python
+from deepseekocr_net.utils.config import Config
+
+cfg = Config.from_file('configs/deepseek_ocr_image_config.py')
+print(cfg.model.path)  # Dot notation access
+print(cfg.image.base_size)  # Nested access
+```
+
+### Using the New Inference Pipeline
+
+The new `tools/infer_ocr_image.py` pipeline:
+
+```bash
+# Basic usage (uses default config)
+python -m tools.infer_ocr_image
+
+# Custom config file
+python -m tools.infer_ocr_image --config configs/my_config.py
+
+# Override config values via command line (mmdet3d-style)
+python -m tools.infer_ocr_image \
+    --config configs/deepseek_ocr_image_config.py \
+    --cfg-options paths.input=data/my_image.png \
+                   paths.output=results/output.md \
+                   image.crop_mode=False
+```
+
+**Important Notes:**
+- Model weights and tokenizer are automatically downloaded to `cfg.model.path` if not present
+- The `DeepseekOCRProcessor` handles tokenizer download/loading internally based on whether a tokenizer is provided
+- All utility functions (image loading, bbox drawing, etc.) are in `tools/utils.py` for better organization
+
 ## vLLM-Inference
-- VLLM:
->**Note:** change the INPUT_PATH/OUTPUT_PATH and other settings in the DeepSeek-OCR-master/DeepSeek-OCR-vllm/config.py
-```Shell
-cd DeepSeek-OCR-master/DeepSeek-OCR-vllm
+
+### New Modular Pipeline (Recommended)
+
+The new modular inference pipeline provides a cleaner, more maintainable approach:
+
+```bash
+# Run inference with default config
+python -m tools.infer_ocr_image
+
+# Use custom config and override settings
+python -m tools.infer_ocr_image \
+    --config configs/deepseek_ocr_image_config.py \
+    --cfg-options paths.input=data/my_image.png \
+                   image.crop_mode=False
 ```
-1. image: streaming output
+
+**Features:**
+- Automatic model download to `weights/DeepSeek-OCR`
+- mmdet3d-like config system with dot notation
+- Command-line argument merging via `--cfg-options`
+- Modular builder functions for easy customization
+- Clean separation of utilities in `tools/utils.py`
+
+### Legacy Scripts (For Reference)
+
+The original scripts are still available in `tools/` for reference:
+
+>**Note:** For legacy scripts, change the INPUT_PATH/OUTPUT_PATH and other settings in `configs/deepseek_ocr_image_config.py` or use command-line overrides.
+
+1. Image: streaming output
 ```Shell
-python run_dpsk_ocr_image.py
+python tools/run_dpsk_ocr_image.py
 ```
-2. pdf: concurrency ~2500tokens/s(an A100-40G)
+2. PDF: concurrency ~2500tokens/s(an A100-40G)
 ```Shell
-python run_dpsk_ocr_pdf.py
+python tools/run_dpsk_ocr_pdf.py
 ```
-3. batch eval for benchmarks
+3. Batch eval for benchmarks
 ```Shell
-python run_dpsk_ocr_eval_batch.py
+python tools/run_dpsk_ocr_eval_batch.py
 ```
 
 **[2025/10/23] The version of upstream [vLLM](https://docs.vllm.ai/projects/recipes/en/latest/DeepSeek/DeepSeek-OCR.html#installing-vllm):**
