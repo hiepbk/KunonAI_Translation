@@ -19,16 +19,8 @@ dependencies = [
     "numpy",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest",
-    "black",
-    "flake8",
-]
-
 [tool.setuptools]
-packages = {find = {}}
+packages = {find = {exclude = ["tests", "tests.*", "data", "weights", "results", "tools", "assets"]}}
 
 [tool.setuptools.package-data]
 "*" = ["*.md", "*.txt", "*.json"]
-

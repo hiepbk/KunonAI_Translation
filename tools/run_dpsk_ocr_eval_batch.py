@@ -7,17 +7,17 @@ if torch.version.cuda == '11.8':
 os.environ['VLLM_USE_V1'] = '0'
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
-from config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, MAX_CONCURRENCY, CROP_MODE, NUM_WORKERS
+from configs.config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, MAX_CONCURRENCY, CROP_MODE, NUM_WORKERS
 from concurrent.futures import ThreadPoolExecutor
 import glob
 from PIL import Image
-from deepseek_ocr import DeepseekOCRForCausalLM
+from deepseekocr_net.deepseek_ocr import DeepseekOCRForCausalLM
 
 from vllm.model_executor.models.registry import ModelRegistry
 
 from vllm import LLM, SamplingParams
-from process.ngram_norepeat import NoRepeatNGramLogitsProcessor
-from process.image_process import DeepseekOCRProcessor
+from deepseekocr_net.process.ngram_norepeat import NoRepeatNGramLogitsProcessor
+from deepseekocr_net.process.image_process import DeepseekOCRProcessor
 ModelRegistry.register_model("DeepseekOCRForCausalLM", DeepseekOCRForCausalLM)
 
 

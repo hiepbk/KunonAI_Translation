@@ -13,13 +13,13 @@ from vllm import AsyncLLMEngine, SamplingParams
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.model_executor.models.registry import ModelRegistry
 import time
-from deepseek_ocr import DeepseekOCRForCausalLM
+from deepseekocr_net.deepseek_ocr import DeepseekOCRForCausalLM
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import numpy as np
 from tqdm import tqdm
-from process.ngram_norepeat import NoRepeatNGramLogitsProcessor
-from process.image_process import DeepseekOCRProcessor
-from config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, CROP_MODE
+from deepseekocr_net.process.ngram_norepeat import NoRepeatNGramLogitsProcessor
+from deepseekocr_net.process.image_process import DeepseekOCRProcessor
+from configs.config import MODEL_PATH, INPUT_PATH, OUTPUT_PATH, PROMPT, CROP_MODE
 
 
 
