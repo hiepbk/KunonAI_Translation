@@ -150,8 +150,44 @@ def build_engine(ckpt_path: str, cfg) -> AsyncLLMEngine:
     Returns:
         AsyncLLMEngine instance
     """
-    # Determine model path for vLLM (use local path if exists, otherwise HuggingFace ID)
-    vllm_model_path = ckpt_path if (os.path.exists(ckpt_path) and os.path.isdir(ckpt_path)) else 'deepseek-ai/DeepSeek-OCR'
+    # Check if local ckpt path exists and has model files
+    has_local_model = False
+    if os.path.exists(ckpt_path) and os.path.isdir(ckpt_path):
+        # Check if model weights exist (safetensors files)
+        safetensors_files = list(Path(ckpt_path).glob("*.safetensors"))
+        if safetensors_files:
+            has_local_model = True
+    
+    if not has_local_model:
+        # Download model weights to local ckpt folder (not HuggingFace cache)
+        from huggingface_hub import snapshot_download
+        hf_model_id = 'deepseek-ai/DeepSeek-OCR'
+        print(f"Local model weights not found ({ckpt_path}), downloading to: {ckpt_path}")
+        os.makedirs(ckpt_path, exist_ok=True)
+        
+        # Download only model weights (safetensors, config, etc.)
+        print("Downloading model weights (this may take a while)...")
+        snapshot_download(
+            repo_id=hf_model_id,
+            local_dir=ckpt_path,
+            local_dir_use_symlinks=False,
+            allow_patterns=[
+                "*.safetensors",      # Model weights
+                "config.json",       # Model config
+                "model*.json",       # Model config files
+                "*.json",            # Other config files
+            ],
+            ignore_patterns=[
+                "tokenizer*",        # Tokenizer files (already in tokenizer_path)
+                "vocab*",
+                "special_tokens*",
+                "merges.txt",
+            ],
+        )
+        print(f"✓ Model weights downloaded to: {ckpt_path}")
+    
+    # Use local path for vLLM
+    vllm_model_path = ckpt_path
     
     engine_args = AsyncEngineArgs(
         model=vllm_model_path,
