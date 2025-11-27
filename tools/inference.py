@@ -10,6 +10,7 @@ from typing import Optional, Tuple
 import time
 import queue
 import threading
+import random
 
 import torch
 if torch.version.cuda == '11.8':
@@ -53,9 +54,21 @@ _current_request_id: Optional[str] = None
 _cancel_lock = threading.Lock()
 
 
+def set_random_seeds(seed: Optional[int]):
+    """Set seeds for python, numpy, and torch for deterministic behavior."""
+    if seed is None:
+        return
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
 def build_engine(cfg) -> AsyncLLMEngine:
     """Build vLLM async engine."""
     vllm_model_path = cfg.model.path
+    engine_seed = getattr(cfg.engine, 'seed', None)
     
     engine_args = AsyncEngineArgs(
         model=vllm_model_path,
@@ -66,6 +79,7 @@ def build_engine(cfg) -> AsyncLLMEngine:
         trust_remote_code=cfg.engine.trust_remote_code,
         tensor_parallel_size=cfg.engine.tensor_parallel_size,
         gpu_memory_utilization=cfg.engine.gpu_memory_utilization,
+        seed=engine_seed,
         mm_processor_kwargs={
             'image_size': cfg.image.image_size,
             'base_size': cfg.image.base_size,
@@ -169,6 +183,10 @@ def initialize_model(config_path: str):
     
     # Load config
     _cfg = Config.from_file(config_path)
+    
+    # Set seeds for deterministic behavior if provided
+    engine_seed = getattr(_cfg.engine, 'seed', None)
+    set_random_seeds(engine_seed)
     
     # Create output directories
     os.makedirs(_cfg.paths.output, exist_ok=True)
@@ -395,6 +413,7 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                 # Create mapping from filename to full path
                 image_path_map = {name: path for name, path in image_list}
                 image_choices = [name for name, path in image_list]
+                image_path_state = gr.State(image_path_map)
                 
                 # Dropdown to select image from data folder
                 image_selector = gr.Dropdown(
@@ -404,14 +423,16 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                     interactive=True
                 )
                 
+                refresh_btn = gr.Button("🔄 Refresh Images", size="sm")
+                
                 # Function to load image from selected filename
-                def load_selected_image(selection):
+                def load_selected_image(selection, path_map):
                     """Load image from dropdown selection."""
                     if selection is None or not selection:
                         return None
                     try:
                         # Get full path from mapping
-                        path = image_path_map.get(selection)
+                        path = path_map.get(selection)
                         if path and os.path.exists(path):
                             img = Image.open(path).convert('RGB')
                             return img
@@ -419,6 +440,17 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                     except Exception as e:
                         print(f"Error loading image: {e}")
                         return None
+                
+                def refresh_image_dropdown():
+                    """Refresh dropdown choices to reflect current data folder."""
+                    new_list = get_image_list()
+                    new_map = {name: path for name, path in new_list}
+                    new_choices = [name for name, path in new_list]
+                    return (
+                        gr.Dropdown.update(choices=new_choices, value=None),
+                        new_map,
+                        None  # Clear image preview since selection reset
+                    )
                 
                 # Image display (loaded from selector)
                 image_input = gr.Image(
@@ -430,8 +462,15 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                 # When image is selected from dropdown, load it
                 image_selector.change(
                     fn=load_selected_image,
-                    inputs=image_selector,
+                    inputs=[image_selector, image_path_state],
                     outputs=image_input
+                )
+                
+                # Refresh button updates dropdown choices and stored mapping
+                refresh_btn.click(
+                    fn=refresh_image_dropdown,
+                    inputs=None,
+                    outputs=[image_selector, image_path_state, image_input]
                 )
                 
                 prompt_input = gr.Textbox(
@@ -474,6 +513,12 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                     label="Final Extracted Text (Markdown)",
                     value="Results will appear here..."
                 )
+                # the output image with bounding boxes
+                image_output = gr.Image(
+                    label="Output Image (with bounding boxes)",
+                    height=400
+                )
+                
                 
                 # Streaming text output for real-time generation
                 streaming_text_output = gr.Textbox(
@@ -484,10 +529,7 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                     max_lines=20
                 )
                 
-                image_output = gr.Image(
-                    label="Output Image (with bounding boxes)",
-                    height=400
-                )
+
         
         # Connect the process button with streaming
         process_event = process_btn.click(

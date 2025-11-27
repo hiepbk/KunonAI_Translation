@@ -118,3 +118,6 @@ weights/
 *.bin
 *.pt
 *.pth
+
+# ignore results folder
+results/

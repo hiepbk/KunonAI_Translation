@@ -19,6 +19,7 @@ engine = dict(
     trust_remote_code=True,
     tensor_parallel_size=1,
     gpu_memory_utilization=0.75,
+    seed=42,  # Set to None for nondeterministic runs
 )
 
 # Image processing configuration
@@ -71,7 +72,9 @@ prompt = dict(
     describe_image = '<image>\nDescribe this image in detail.',
     locate_text = '<image>\nLocate <|ref|>xxxx<|/ref|> in the image.',
     test_1 = '<image>\n<|grounding|>OCR this image, output the merged sentences and paragraphs regions.',
-    custom_prompt = '<image>\n<',
+    table_merge_text='<image>\n<|grounding|>OCR all text in this image with bounding boxes. For each text region, output: <|ref|>text_content<|/ref|><|det|>[[x1, y1, x2, y2]]<|/det|>',
+    multiple_text = '<image>\n<|grounding|>OCR all text with bounding boxes.',
+    custom_prompt = '<image>\n',
 )
 
 # Mode presets (TODO: change modes)
