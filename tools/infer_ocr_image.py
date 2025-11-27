@@ -33,6 +33,8 @@ from .utils import (
     process_image_with_refs,
     save_results,
     save_line_type_figure,
+    parse_text_with_boxes,
+    overlay_text_on_image,
 )
 
 # Register the model
@@ -98,7 +100,7 @@ def build_sampling_params(cfg) -> SamplingParams:
 
 
 async def generate_text(engine: AsyncLLMEngine, sampling_params: SamplingParams, 
-                       image_features, prompt: str) -> str:
+                       image_features, prompt: str, raw_image: Image.Image = None) -> str:
     """Generate text from image and prompt using vLLM engine.
     
     Args:
@@ -106,7 +108,7 @@ async def generate_text(engine: AsyncLLMEngine, sampling_params: SamplingParams,
         sampling_params: SamplingParams instance
         image_features: Processed image features
         prompt: Text prompt
-        
+        raw_image: Raw image for debugging
     Returns:
         Generated text output
     """
@@ -132,6 +134,8 @@ async def generate_text(engine: AsyncLLMEngine, sampling_params: SamplingParams,
             print(new_text, end='', flush=True)
             printed_length = len(full_text)
             final_output = full_text
+    
+    print('final_output: \n', final_output)
     print('\n') 
 
     return final_output
@@ -244,11 +248,19 @@ def main():
         raise ValueError(f"Failed to load image from {cfg.paths.input}")
     image = image.convert('RGB')
     
+    # Choose prompt based on text_overlay mode
+    use_text_overlay = getattr(cfg.processing, 'text_overlay', False)
+    if use_text_overlay:
+        prompt_text = getattr(cfg.prompt, 'text_overlay', cfg.prompt.default)
+        print("Using text overlay mode - text will be overlaid on original image")
+    else:
+        prompt_text = cfg.prompt.default
+    
     # Tokenize image
-    if '<image>' in cfg.prompt.default:
+    if '<image>' in prompt_text:
         print("Tokenizing image...")
         image_features = processor.tokenize_with_images(
-            conversation=cfg.prompt.default,
+            conversation=prompt_text,
             images=[image], 
             bos=True, 
             eos=True, 
@@ -261,7 +273,7 @@ def main():
     print("=" * 50)
     print("Running inference...")
     print("=" * 50)
-    result_out = asyncio.run(generate_text(engine, sampling_params, image_features, cfg.prompt.default))
+    result_out = asyncio.run(generate_text(engine, sampling_params, image_features, prompt_text, raw_image=image.copy()))
     
     # Save results
     print("=" * 50)
@@ -277,6 +289,19 @@ def main():
     save_line_type_figure(outputs, cfg.paths.output)
     
     result.save(f'{cfg.paths.output}/result_with_boxes.jpg')
+    
+    # Text overlay mode: overlay predicted text on original image
+    if use_text_overlay:
+        print("Overlaying text on image...")
+        text_boxes = parse_text_with_boxes(outputs)
+        if text_boxes:
+            image_with_text = overlay_text_on_image(image, text_boxes)
+            image_with_text.save(f'{cfg.paths.output}/result_with_text_overlay.jpg')
+            print(f"Text overlay saved to: {cfg.paths.output}/result_with_text_overlay.jpg")
+            print(f"Found {len(text_boxes)} text regions")
+        else:
+            print("Warning: No text with bounding boxes found in output. Make sure the prompt requests grounding format.")
+    
     print(f"Results saved to: {cfg.paths.output}")
 
 

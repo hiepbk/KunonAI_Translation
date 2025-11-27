@@ -36,6 +36,7 @@ processing = dict(
     num_workers=64,  # image pre-process (resize/padding) workers
     print_num_vis_tokens=False,
     skip_repeat=True,
+    text_overlay=True,  # If True, overlay predicted text on original image
 )
 
 
@@ -58,7 +59,7 @@ sampling_params = dict(
 # Input/Output paths
 paths = dict(
     input='data/test_1.png',  # Input file path (.pdf, .jpg, .png, .jpeg)
-    output='results/test_1_result.md',  # Output directory path
+    output='results/test_1',  # Output directory path
 )
 
 # Prompt configuration
@@ -71,6 +72,8 @@ prompt = dict(
     # figures in document: '<image>\nParse the figure.'
     # general: '<image>\nDescribe this image in detail.'
     # rec: '<image>\nLocate <|ref|>xxxx<|/ref|> in the image.'
+    # text_overlay: '<image>\n<|grounding|>OCR all text in this image with bounding boxes. For each text region, output: <|ref|>text_content<|/ref|><|det|>[[x1, y1, x2, y2]]<|/det|>'
+    text_overlay='<image>\n<|grounding|>OCR all text in this image with bounding boxes',
 )
 
 # Mode presets (TODO: change modes)

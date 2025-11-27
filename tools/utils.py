@@ -144,6 +144,154 @@ def save_results(outputs: str, output_path: str, matches_ref: List, matches_imag
     return outputs
 
 
+def parse_text_with_boxes(text: str) -> List[Tuple[str, List[int]]]:
+    """Parse text with bounding boxes from model output.
+    
+    Expected format: 
+        actual_text_content
+        <|ref|>text<|/ref|><|det|>[[x1, y1, x2, y2]]<|/det|>
+    
+    The text content appears BEFORE the grounding annotation, not inside it.
+    
+    Args:
+        text: Model output text containing grounding annotations
+        
+    Returns:
+        List of (text_content, [x1, y1, x2, y2]) tuples
+    """
+    text_boxes = []
+    
+    # Find all grounding annotations with their positions
+    # Pattern: <|ref|>label<|/ref|><|det|>[[coords]]<|/det|>
+    annotation_pattern = r'<\|ref\|>(.*?)<\|/ref\|><\|det\|>\[\[(.*?)\]\]<\|/det\|>'
+    
+    # Find all matches with their positions
+    matches = list(re.finditer(annotation_pattern, text, re.DOTALL))
+    
+    for i, match in enumerate(matches):
+        label_type = match.group(1).strip()
+        coords_str = match.group(2)
+        annotation_start = match.start()
+        
+        # Only process text annotations
+        if label_type != 'text':
+            continue
+        
+        try:
+            # Parse coordinates
+            coords = [int(x.strip()) for x in coords_str.split(',')]
+            if len(coords) != 4:
+                continue
+            
+            # Find the text that appears immediately before this annotation
+            # Look backwards from annotation start
+            text_end = annotation_start
+            
+            # Find where the text starts (after previous annotation or start of string)
+            text_start = 0
+            if i > 0:
+                # Start from the end of the previous annotation
+                prev_annotation_end = matches[i-1].end()
+                # Skip any whitespace/newlines immediately after previous annotation
+                text_start = prev_annotation_end
+                # Skip leading whitespace but keep the actual text
+                while text_start < text_end and text[text_start] in '\n\r\t ':
+                    text_start += 1
+            
+            # Extract text between text_start and annotation_start
+            preceding_text = text[text_start:text_end]
+            
+            # Remove trailing whitespace/newlines (before the annotation)
+            preceding_text = preceding_text.rstrip()
+            
+            # Normalize internal whitespace but preserve structure
+            # Replace multiple newlines with single space, multiple spaces with single space
+            cleaned_text = re.sub(r'\n+', ' ', preceding_text)  # Newlines -> space
+            cleaned_text = re.sub(r' +', ' ', cleaned_text)     # Multiple spaces -> single space
+            cleaned_text = cleaned_text.strip()
+            
+            # Only add if we have actual text content
+            if cleaned_text:
+                text_boxes.append((cleaned_text, coords))
+                
+        except Exception as e:
+            print(f"Error parsing annotation: {e}")
+            continue
+    
+    return text_boxes
+
+
+def overlay_text_on_image(
+    image: Image.Image, 
+    text_boxes: List[Tuple[str, List[int]]],
+    font_size: int = 12,
+    text_color: Tuple[int, int, int] = (255, 0, 0),  # Red
+    bg_color: Tuple[int, int, int, int] = (255, 255, 255, 200),  # Semi-transparent white
+    show_boxes: bool = True,
+    box_color: Tuple[int, int, int] = (0, 255, 0),  # Green
+) -> Image.Image:
+    """Overlay predicted text on image at their bounding box positions.
+    
+    Args:
+        image: Original PIL Image
+        text_boxes: List of (text_content, [x1, y1, x2, y2]) tuples
+        font_size: Font size for text overlay
+        text_color: RGB color for text
+        bg_color: RGBA color for text background
+        show_boxes: Whether to draw bounding boxes
+        box_color: RGB color for bounding boxes
+        
+    Returns:
+        Image with overlaid text
+    """
+    img_overlay = image.copy()
+    image_width, image_height = image.size
+    draw = ImageDraw.Draw(img_overlay, 'RGBA')
+    
+    # Try to load a better font, fallback to default
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+    except:
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+        except:
+            font = ImageFont.load_default()
+    
+    for text_content, coords in text_boxes:
+        try:
+            # Convert normalized coordinates (0-999) to pixel coordinates
+            x1, y1, x2, y2 = coords
+            x1 = int(x1 / 999 * image_width)
+            y1 = int(y1 / 999 * image_height)
+            x2 = int(x2 / 999 * image_width)
+            y2 = int(y2 / 999 * image_height)
+            
+            # Draw bounding box if requested
+            if show_boxes:
+                draw.rectangle([x1, y1, x2, y2], outline=box_color, width=2)
+            
+            # Draw text background (semi-transparent)
+            text_bbox = draw.textbbox((x1, y1), text_content, font=font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+            
+            # Draw background rectangle
+            bg_x1 = x1
+            bg_y1 = y1
+            bg_x2 = min(x1 + text_width + 4, image_width)
+            bg_y2 = min(y1 + text_height + 4, image_height)
+            draw.rectangle([bg_x1, bg_y1, bg_x2, bg_y2], fill=bg_color)
+            
+            # Draw text
+            draw.text((x1 + 2, y1 + 2), text_content, font=font, fill=text_color)
+            
+        except Exception as e:
+            print(f"Error overlaying text '{text_content[:50]}...': {e}")
+            continue
+    
+    return img_overlay
+
+
 def save_line_type_figure(outputs: str, output_path: str) -> None:
     """Save line type figure if present in outputs."""
     if 'line_type' not in outputs:
