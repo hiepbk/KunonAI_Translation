@@ -71,6 +71,7 @@ prompt = dict(
     describe_image = '<image>\nDescribe this image in detail.',
     locate_text = '<image>\nLocate <|ref|>xxxx<|/ref|> in the image.',
     test_1 = '<image>\n<|grounding|>OCR this image, output the merged sentences and paragraphs regions.',
+    custom_prompt = '<image>\n<',
 )
 
 # Mode presets (TODO: change modes)
