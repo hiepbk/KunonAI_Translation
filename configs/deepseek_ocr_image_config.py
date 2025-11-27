@@ -58,8 +58,8 @@ sampling_params = dict(
 
 # Input/Output paths
 paths = dict(
-    input='data/test_2.png',  # Input file path (.pdf, .jpg, .png, .jpeg)
-    output='results/test_2',  # Output directory path
+    input='data/test_1.png',  # Input file path (.pdf, .jpg, .png, .jpeg)
+    output='results/test_1',  # Output directory path
 )
 
 # Prompt configuration
@@ -72,7 +72,7 @@ prompt = dict(
     figures_in_document = '<image>\nParse the figure.',
     general_text = '<image>\nDescribe this image in detail.',
     rec_text = '<image>\nLocate <|ref|>xxxx<|/ref|> in the image.',
-    
+    test_1 = '<image>\n<|grounding|>OCR this image, output the merged sentences and paragraphs regions.',
     test_8 = '<image>\n<|grounding|>OCR this image, output the merged sentences and paragraphs regions.',
 )
 
@@ -85,4 +85,4 @@ modes = dict(
     gundam=dict(base_size=1024, image_size=640, crop_mode=True),
 )
 
-show_visualization = True
+show_visualization = False  # Disabled for UI mode

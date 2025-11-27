@@ -8,3 +8,4 @@ addict
 Pillow
 numpy
 matplotlib
+gradio>=4.0.0
