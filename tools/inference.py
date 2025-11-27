@@ -143,7 +143,12 @@ async def generate_text_stream(engine: AsyncLLMEngine, sampling_params: Sampling
             with _cancel_lock:
                 if _current_request_id != request_id:
                     # Request was cancelled, stop generating
-                    break
+                    # Abort the request to ensure cleanup
+                    try:
+                        engine.abort(request_id)
+                    except Exception:
+                        pass
+                    raise asyncio.CancelledError("Request cancelled")
             
             if request_output.outputs:
                 full_text = request_output.outputs[0].text
@@ -152,8 +157,12 @@ async def generate_text_stream(engine: AsyncLLMEngine, sampling_params: Sampling
                     printed_length = len(full_text)
                     yield new_text
     except asyncio.CancelledError:
-        # Handle cancellation gracefully
-        pass
+        # Handle cancellation gracefully - re-raise to propagate
+        raise
+    except Exception as e:
+        # Log other exceptions but don't suppress them
+        print(f"Error in generate_text_stream: {e}")
+        raise
 
 
 def initialize_model(config_path: str):
@@ -245,9 +254,12 @@ def process_image_ui_stream(image: Image.Image, prompt: str, output_dir: str):
         text_queue = queue.Queue()
         done = threading.Event()
         cancelled = threading.Event()
+        async_task = None
+        loop = None
         
         async def stream_async():
             """Run async stream and put chunks in queue."""
+            nonlocal async_task, image_features
             try:
                 async for chunk in generate_text_stream(_engine, _sampling_params, image_features, prompt, request_id):
                     # Check if cancelled
@@ -258,57 +270,103 @@ def process_image_ui_stream(image: Image.Image, prompt: str, output_dir: str):
                     text_queue.put(chunk)
                 if not cancelled.is_set():
                     text_queue.put(None)  # Signal done
+            except asyncio.CancelledError:
+                # Properly handle cancellation
+                cancelled.set()
+                text_queue.put(None)
             except Exception as e:
                 if not cancelled.is_set():
                     text_queue.put(None)
-                raise e
+                print(f"Error in stream_async: {e}")
+            finally:
+                # Cleanup: clear image_features reference to help GC
+                image_features = None
         
-        # Start async stream in background
+        # Start async stream in background with proper event loop management
         def run_async():
-            asyncio.run(stream_async())
-            done.set()
+            nonlocal loop, async_task
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                async_task = loop.create_task(stream_async())
+                loop.run_until_complete(async_task)
+            except Exception as e:
+                print(f"Error in run_async: {e}")
+            finally:
+                # Cleanup event loop
+                try:
+                    if loop and not loop.is_closed():
+                        # Cancel any remaining tasks
+                        pending = asyncio.all_tasks(loop)
+                        for task in pending:
+                            task.cancel()
+                        # Wait for tasks to complete cancellation
+                        if pending:
+                            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                        loop.close()
+                except Exception as e:
+                    print(f"Error cleaning up event loop: {e}")
+                done.set()
         
         stream_thread = threading.Thread(target=run_async, daemon=True)
         stream_thread.start()
         
         # Yield chunks as they arrive
-        while not done.is_set() or not text_queue.empty():
-            # Check if cancelled (check both the event and the request_id)
-            if cancelled.is_set():
-                break
-            
-            # Also check if request_id was cleared (cancelled externally)
-            with _cancel_lock:
-                if _current_request_id != request_id:
-                    cancelled.set()
+        try:
+            while not done.is_set() or not text_queue.empty():
+                # Check if cancelled (check both the event and the request_id)
+                if cancelled.is_set():
                     break
                 
-            try:
-                chunk = text_queue.get(timeout=0.1)
-                if chunk is None:
-                    break
-                accumulated_text += chunk
-                yield accumulated_text, "🔄 Generating...", None, ""
-            except queue.Empty:
-                continue
-        
-        # Check if cancelled
-        if cancelled.is_set():
-            # Clean up: abort the request in the engine
-            try:
-                _engine.abort(request_id)
-            except Exception as e:
-                print(f"Error aborting request: {e}")
-            
-            # Clear the request ID
-            with _cancel_lock:
-                if _current_request_id == request_id:
-                    _current_request_id = None
-            
-            yield accumulated_text, "⚠️ Cancelled by user", None, ""
-            return
+                # Also check if request_id was cleared (cancelled externally)
+                with _cancel_lock:
+                    if _current_request_id != request_id:
+                        cancelled.set()
+                        break
+                    
+                try:
+                    chunk = text_queue.get(timeout=0.1)
+                    if chunk is None:
+                        break
+                    accumulated_text += chunk
+                    yield accumulated_text, "🔄 Generating...", None, ""
+                except queue.Empty:
+                    continue
+        finally:
+            # Ensure cleanup happens even if we break early
+            if cancelled.is_set():
+                # Abort the request in the engine first
+                try:
+                    _engine.abort(request_id)
+                except Exception as e:
+                    print(f"Error aborting request: {e}")
+                
+                # Cancel the async task if it's still running
+                # Note: The task will be cleaned up when the thread's event loop closes
+                # We've already aborted the engine request, which should stop generation
+                
+                # Clear the queue to prevent memory buildup
+                while not text_queue.empty():
+                    try:
+                        text_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                
+                # Clear the request ID
+                with _cancel_lock:
+                    if _current_request_id == request_id:
+                        _current_request_id = None
+                
+                # Clear image_features reference
+                image_features = None
+                
+                yield accumulated_text, "⚠️ Cancelled by user", None, ""
+                return
         
         result_text = accumulated_text
+        
+        # Clear image_features reference after use to help GC
+        image_features = None
         
         # Process results
         matches_ref, matches_images, matches_other = re_match(result_text)
@@ -498,19 +556,24 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
         
         # Cancel function
         def cancel_inference():
-            """Cancel the current inference request."""
+            """Cancel the current inference request and ensure proper cleanup."""
             global _current_request_id, _engine
             
             with _cancel_lock:
                 if _current_request_id is not None and _engine is not None:
+                    request_to_cancel = _current_request_id
                     try:
-                        print(f"Cancelling request: {_current_request_id}")
-                        _engine.abort(_current_request_id)
+                        print(f"Cancelling request: {request_to_cancel}")
+                        # Abort the request in the engine
+                        _engine.abort(request_to_cancel)
+                        # Clear the request ID to signal cancellation
                         _current_request_id = None
-                        return "⚠️ Cancellation requested..."
+                        return "⚠️ Cancellation requested... Cleaning up..."
                     except Exception as e:
                         print(f"Error cancelling request: {e}")
-                        return f"Error cancelling: {str(e)}"
+                        # Still clear the request ID even if abort fails
+                        _current_request_id = None
+                        return f"⚠️ Cancellation requested (cleanup may be in progress)"
                 else:
                     return "No active request to cancel"
         
