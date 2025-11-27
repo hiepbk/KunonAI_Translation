@@ -313,6 +313,8 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
 
         self.config = config
         self.multimodal_config = multimodal_config
+        mm_processor_kwargs = getattr(multimodal_config, "mm_processor_kwargs", {}) or {}
+        self.print_num_vis_tokens = mm_processor_kwargs.get("print_num_vis_tokens", False)
 
 
         self.vision_config = config.vision_config
@@ -444,7 +446,7 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
                     global_features = torch.cat((global_features_2[:, 1:], global_features_1.flatten(2).permute(0, 2, 1)), dim=-1) 
                     global_features = self.projector(global_features)
 
-                    if getattr(self.info, "print_num_vis_tokens", False):
+                    if self.print_num_vis_tokens:
                         print('=====================')
                         print('BASE: ', global_features.shape)
                         print('PATCHES: ', local_features.shape)
@@ -481,7 +483,7 @@ class DeepseekOCRForCausalLM(nn.Module, SupportsMultiModal, SupportsPP):
                     global_features = torch.cat((global_features_2[:, 1:], global_features_1.flatten(2).permute(0, 2, 1)), dim=-1) 
                     global_features = self.projector(global_features)
 
-                    if getattr(self.info, "print_num_vis_tokens", False):
+                    if self.print_num_vis_tokens:
                         print('=====================')
                         print('BASE: ', global_features.shape)
                         print('NO PATCHES')

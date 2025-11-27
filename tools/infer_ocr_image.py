@@ -232,7 +232,7 @@ def main():
     
     processor = DeepseekOCRProcessor(cfg=cfg)
     engine = build_engine(cfg)
-    sampling_params = build_sampling_params()
+    sampling_params = build_sampling_params(cfg)
     
     # Load and process image
     print("=" * 50)
