@@ -423,34 +423,27 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                     interactive=True
                 )
                 
-                refresh_btn = gr.Button("🔄 Refresh Images", size="sm")
-                
                 # Function to load image from selected filename
                 def load_selected_image(selection, path_map):
                     """Load image from dropdown selection."""
                     if selection is None or not selection:
                         return None
                     try:
-                        # Get full path from mapping
                         path = path_map.get(selection)
                         if path and os.path.exists(path):
-                            img = Image.open(path).convert('RGB')
-                            return img
-                        return None
+                            return Image.open(path).convert('RGB')
                     except Exception as e:
                         print(f"Error loading image: {e}")
-                        return None
+                    return None
                 
-                def refresh_image_dropdown():
-                    """Refresh dropdown choices to reflect current data folder."""
+                def refresh_dropdown(current_selection, current_map):
+                    """Refresh dropdown choices when user opens it."""
                     new_list = get_image_list()
                     new_map = {name: path for name, path in new_list}
                     new_choices = [name for name, path in new_list]
-                    return (
-                        gr.Dropdown.update(choices=new_choices, value=None),
-                        new_map,
-                        None  # Clear image preview since selection reset
-                    )
+                    new_selection = current_selection if current_selection in new_map else None
+                    dropdown_update = gr.update(choices=new_choices, value=new_selection)
+                    return dropdown_update, new_map
                 
                 # Image display (loaded from selector)
                 image_input = gr.Image(
@@ -466,11 +459,10 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                     outputs=image_input
                 )
                 
-                # Refresh button updates dropdown choices and stored mapping
-                refresh_btn.click(
-                    fn=refresh_image_dropdown,
-                    inputs=None,
-                    outputs=[image_selector, image_path_state, image_input]
+                image_selector.focus(
+                    fn=refresh_dropdown,
+                    inputs=[image_selector, image_path_state],
+                    outputs=[image_selector, image_path_state]
                 )
                 
                 prompt_input = gr.Textbox(
@@ -547,7 +539,17 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                 if _current_request_id is not None and _engine is not None:
                     try:
                         print(f"Cancelling request: {_current_request_id}")
-                        _engine.abort(_current_request_id)
+                        request_to_cancel = _current_request_id
+                        # run abort coroutine
+                        def _abort():
+                            return asyncio.run(_engine.abort(request_to_cancel))
+                        try:
+                            _abort()
+                        except RuntimeError:
+                            # If event loop already running (unlikely here), fallback to create new loop
+                            loop = asyncio.new_event_loop()
+                            loop.run_until_complete(_engine.abort(request_to_cancel))
+                            loop.close()
                         _current_request_id = None
                         return "⚠️ Cancellation requested..."
                     except Exception as e:
