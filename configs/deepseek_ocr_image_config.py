@@ -64,16 +64,13 @@ paths = dict(
 
 # Prompt configuration
 prompt = dict(
-    default='<image>\n<|grounding|>Convert the document to markdown.',
-    # Other commonly used prompts:
+    
+    simple_ocr = '<image>\n<|grounding|>OCR this image.',
     document_text = '<image>\n<|grounding|>Convert the document to markdown.',
-    other_image = '<image>\n<|grounding|>OCR this image.',
-    without_layouts = '<image>\nFree OCR.',
-    figures_in_document = '<image>\nParse the figure.',
-    general_text = '<image>\nDescribe this image in detail.',
-    rec_text = '<image>\nLocate <|ref|>xxxx<|/ref|> in the image.',
+    parse_figure = '<image>\nParse the figure.',
+    describe_image = '<image>\nDescribe this image in detail.',
+    locate_text = '<image>\nLocate <|ref|>xxxx<|/ref|> in the image.',
     test_1 = '<image>\n<|grounding|>OCR this image, output the merged sentences and paragraphs regions.',
-    test_8 = '<image>\n<|grounding|>OCR this image, output the merged sentences and paragraphs regions.',
 )
 
 # Mode presets (TODO: change modes)

@@ -299,14 +299,8 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
     
     # Load default prompts from config
     cfg = Config.from_file(config_path)
-    default_prompts = {
-        "Default": cfg.prompt.default,
-        "Document Text": cfg.prompt.document_text,
-        "OCR Image": cfg.prompt.other_image,
-        "Free OCR": cfg.prompt.without_layouts,
-        "Table Merge": getattr(cfg.prompt, 'table_merge_text', cfg.prompt.default),
-        "Test 8": getattr(cfg.prompt, 'test_8', cfg.prompt.default),
-    }
+    # take all prompts from cfg.prompt
+    default_prompts = {name: prompt for name, prompt in cfg.prompt.items()}
     
     # Create UI
     with gr.Blocks(title="DeepSeek-OCR Inference") as demo:
@@ -380,7 +374,7 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                     label="Prompt",
                     placeholder="Enter your prompt here...",
                     lines=5,
-                    value=cfg.prompt.default
+                    value=default_prompts[list(default_prompts.keys())[0]]
                 )
                 
                 # Quick prompt buttons
