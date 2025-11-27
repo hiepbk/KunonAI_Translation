@@ -179,7 +179,6 @@ def initialize_model(config_path: str):
     return "Model loaded successfully! Ready to process images."
 
 
-
 def process_image_ui_stream(image: Image.Image, prompt: str, output_dir: str):
     """
     Process image with streaming text output.
