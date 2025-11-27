@@ -15,7 +15,7 @@ engine = dict(
     ),
     block_size=256,
     max_model_len=8192,
-    enforce_eager=False,
+    enforce_eager=True,
     trust_remote_code=True,
     tensor_parallel_size=1,
     gpu_memory_utilization=0.75,
@@ -66,14 +66,15 @@ paths = dict(
 prompt = dict(
     default='<image>\n<|grounding|>Convert the document to markdown.',
     # Other commonly used prompts:
-    # document: '<image>\n<|grounding|>Convert the document to markdown.'
-    # other image: '<image>\n<|grounding|>OCR this image.'
-    # without layouts: '<image>\nFree OCR.'
-    # figures in document: '<image>\nParse the figure.'
-    # general: '<image>\nDescribe this image in detail.'
-    # rec: '<image>\nLocate <|ref|>xxxx<|/ref|> in the image.'
-    # text_overlay: '<image>\n<|grounding|>OCR all text in this image with bounding boxes. For each text region, output: <|ref|>text_content<|/ref|><|det|>[[x1, y1, x2, y2]]<|/det|>'
-    text_overlay='<image>\n<|grounding|>OCR all text in this image with bounding boxes',
+    document_text = '<image>\n<|grounding|>Convert the document to markdown.',
+    other_image = '<image>\n<|grounding|>OCR this image.',
+    without_layouts = '<image>\nFree OCR.',
+    figures_in_document = '<image>\nParse the figure.',
+    general_text = '<image>\nDescribe this image in detail.',
+    rec_text = '<image>\nLocate <|ref|>xxxx<|/ref|> in the image.',
+    # This promt good to extract the region of the text, so that can keep full sentences and paragraphs without breaking them into multiple lines.
+    table_merge_text='<image>\n<|grounding|>OCR all text in this image with bounding boxes. For each text region, output: <|ref|>text_content<|/ref|><|det|>[[x1, y1, x2, y2]]<|/det|>',
+    multiple_text = '<image>\n<|grounding|>OCR all text with bounding boxes.'
 )
 
 # Mode presets (TODO: change modes)
@@ -84,3 +85,5 @@ modes = dict(
     large=dict(base_size=1280, image_size=1280, crop_mode=False),
     gundam=dict(base_size=1024, image_size=640, crop_mode=True),
 )
+
+show_visualization = True

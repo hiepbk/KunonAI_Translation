@@ -170,9 +170,8 @@ python -m tools.infer_ocr_image --config configs/my_config.py
 # Override config values via command line (mmdet3d-style)
 python -m tools.infer_ocr_image \
     --config configs/deepseek_ocr_image_config.py \
-    --cfg-options paths.input=data/my_image.png \
-                   paths.output=results/output.md \
-                   image.crop_mode=False
+    --cfg-options paths.input=data/test_1.png \
+                   paths.output=results/test_1
 ```
 
 **Important Notes:**
