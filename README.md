@@ -165,7 +165,7 @@ The new `tools/infer_ocr_image.py` pipeline:
 python -m tools.infer_ocr_image
 
 # Custom config file
-python -m tools.infer_ocr_image --config configs/my_config.py
+python -m tools.infer_ocr_image --config configs/deepseek_ocr_image_config.py
 
 # Override config values via command line (mmdet3d-style)
 python -m tools.infer_ocr_image \

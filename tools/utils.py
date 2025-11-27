@@ -125,7 +125,7 @@ def process_image_with_refs(image: Image.Image, ref_texts: List[str], output_pat
 
 def save_results(outputs: str, output_path: str, matches_ref: List, matches_images: List, matches_other: List) -> None:
     """Save OCR results to files."""
-    # Save original output
+    # Save original output (keep .mmd for original, use .md for processed)
     with open(f'{output_path}/result_ori.mmd', 'w', encoding='utf-8') as f:
         f.write(outputs)
     
@@ -137,7 +137,10 @@ def save_results(outputs: str, output_path: str, matches_ref: List, matches_imag
     for idx, a_match_other in enumerate(matches_other):
         outputs = outputs.replace(a_match_other, '').replace('\\coloneqq', ':=').replace('\\eqqcolon', '=:')
     
-    # Save processed output
+    # Save processed output as .md for markdown preview support
+    with open(f'{output_path}/result.md', 'w', encoding='utf-8') as f:
+        f.write(outputs)
+    # Also save as .mmd for backward compatibility
     with open(f'{output_path}/result.mmd', 'w', encoding='utf-8') as f:
         f.write(outputs)
     

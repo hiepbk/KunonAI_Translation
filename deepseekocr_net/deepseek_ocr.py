@@ -166,20 +166,20 @@ class DeepseekOCRDummyInputsBuilder(
 
         # For dummy inputs, we assume image token is in prompt (vLLM will handle actual prompt)
         processor = self.info.get_hf_processor()
-        return {
-            "image":
+            return {
+                "image":
             processor.tokenize_with_images(
                 conversation="<image>",  # Dummy conversation for dummy inputs
                 images=self._get_dummy_images(
                     width=max_image_size.width,
-                    height=max_image_size.height,
+                                    height=max_image_size.height,
                     num_images=num_images
                 ), 
                 bos=True, 
                 eos=True, 
                 cropping=crop_mode
             )
-        }
+            }
 
 
 

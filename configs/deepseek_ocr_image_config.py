@@ -58,8 +58,8 @@ sampling_params = dict(
 
 # Input/Output paths
 paths = dict(
-    input='data/test_1.png',  # Input file path (.pdf, .jpg, .png, .jpeg)
-    output='results/test_1',  # Output directory path
+    input='data/test_2.png',  # Input file path (.pdf, .jpg, .png, .jpeg)
+    output='results/test_2',  # Output directory path
 )
 
 # Prompt configuration
@@ -72,11 +72,8 @@ prompt = dict(
     figures_in_document = '<image>\nParse the figure.',
     general_text = '<image>\nDescribe this image in detail.',
     rec_text = '<image>\nLocate <|ref|>xxxx<|/ref|> in the image.',
-    # This promt good to extract the region of the text, so that can keep full sentences and paragraphs without breaking them into multiple lines.
-    table_merge_text='<image>\n<|grounding|>OCR all text in this image with bounding boxes. For each text region, output: <|ref|>text_content<|/ref|><|det|>[[x1, y1, x2, y2]]<|/det|>',
-    multiple_text = '<image>\n<|grounding|>OCR all text with bounding boxes.',
-    only_text = '<image>\nOCR all text. Keep the original sentences and paragraphs structure',
-    test1 = '<image>\n<|grounding|>OCR this image, output the merged sentences and paragraphs regions.',
+    
+    test_8 = '<image>\n<|grounding|>OCR this image, output the merged sentences and paragraphs regions.',
 )
 
 # Mode presets (TODO: change modes)
