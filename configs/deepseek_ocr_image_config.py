@@ -15,7 +15,7 @@ engine = dict(
     ),
     block_size=256,
     max_model_len=8192,
-    enforce_eager=True, # in future, set to False for better performance of inference
+    enforce_eager=False, # in future, set to False for better performance of inference
     trust_remote_code=True,
     tensor_parallel_size=1,
     gpu_memory_utilization=0.75,

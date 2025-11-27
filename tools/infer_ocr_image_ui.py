@@ -8,6 +8,8 @@ import argparse
 from pathlib import Path
 from typing import Optional, Tuple
 import time
+import queue
+import threading
 
 import torch
 if torch.version.cuda == '11.8':
@@ -114,6 +116,33 @@ async def generate_text(engine: AsyncLLMEngine, sampling_params: SamplingParams,
     return final_output
 
 
+async def generate_text_stream(engine: AsyncLLMEngine, sampling_params: SamplingParams, 
+                                image_features, prompt: str):
+    """Generate text with streaming - yields text incrementally."""
+    request_id = f"request-{int(time.time())}"
+    printed_length = 0
+    
+    if image_features and '<image>' in prompt:
+        request = {
+            "prompt": prompt,
+            "multi_modal_data": {"image": image_features}
+        }
+    elif prompt:
+        request = {
+            "prompt": prompt
+        }
+    else:
+        raise ValueError("Prompt is required")
+    
+    async for request_output in engine.generate(request, sampling_params, request_id):
+        if request_output.outputs:
+            full_text = request_output.outputs[0].text
+            new_text = full_text[printed_length:]
+            if new_text:  # Only yield if there's new text
+                printed_length = len(full_text)
+                yield new_text
+
+
 def initialize_model(config_path: str):
     """Initialize model components once at startup."""
     global _engine, _processor, _sampling_params, _cfg
@@ -150,23 +179,24 @@ def initialize_model(config_path: str):
     return "Model loaded successfully! Ready to process images."
 
 
-def process_image_ui(image: Image.Image, prompt: str, output_dir: str) -> Tuple[Optional[Image.Image], str, str]:
+def process_image_ui_stream(image: Image.Image, prompt: str, output_dir: str):
     """
-    Process image with given prompt.
-    
-    Returns:
-        Tuple of (output_image, output_text, status_message)
+    Process image with streaming text output.
+    Yields: (streaming_text, status, output_image, final_markdown)
     """
     global _engine, _processor, _sampling_params, _cfg
     
     if _engine is None or _processor is None:
-        return None, "", "Error: Model not initialized. Please restart the application."
+        yield "", "Error: Model not initialized. Please restart the application.", None, ""
+        return
     
     if image is None:
-        return None, "", "Error: Please upload an image."
+        yield "", "Error: Please upload an image.", None, ""
+        return
     
     if not prompt or not prompt.strip():
-        return None, "", "Error: Please provide a prompt."
+        yield "", "Error: Please provide a prompt.", None, ""
+        return
     
     try:
         # Convert image to RGB
@@ -189,9 +219,44 @@ def process_image_ui(image: Image.Image, prompt: str, output_dir: str) -> Tuple[
                 cropping=_cfg.image.crop_mode
             )
         
-        # Run inference
+        # Run streaming inference
         print(f"Running inference with prompt: {prompt[:50]}...")
-        result_text = asyncio.run(generate_text(_engine, _sampling_params, image_features, prompt))
+        accumulated_text = ""
+        
+        # Use a queue to bridge async generator to sync generator
+        text_queue = queue.Queue()
+        done = threading.Event()
+        
+        async def stream_async():
+            """Run async stream and put chunks in queue."""
+            try:
+                async for chunk in generate_text_stream(_engine, _sampling_params, image_features, prompt):
+                    text_queue.put(chunk)
+                text_queue.put(None)  # Signal done
+            except Exception as e:
+                text_queue.put(None)
+                raise e
+        
+        # Start async stream in background
+        def run_async():
+            asyncio.run(stream_async())
+            done.set()
+        
+        stream_thread = threading.Thread(target=run_async, daemon=True)
+        stream_thread.start()
+        
+        # Yield chunks as they arrive
+        while not done.is_set() or not text_queue.empty():
+            try:
+                chunk = text_queue.get(timeout=0.1)
+                if chunk is None:
+                    break
+                accumulated_text += chunk
+                yield accumulated_text, "🔄 Generating...", None, ""
+            except queue.Empty:
+                continue
+        
+        result_text = accumulated_text
         
         # Process results
         matches_ref, matches_images, matches_other = re_match(result_text)
@@ -216,14 +281,14 @@ def process_image_ui(image: Image.Image, prompt: str, output_dir: str) -> Tuple[
             markdown_content = result_text
         
         status = f"✓ Success! Results saved to: {output_path}"
-        return output_image, markdown_content, status
+        yield result_text, status, output_image, markdown_content
         
     except Exception as e:
         error_msg = f"Error processing image: {str(e)}"
         print(error_msg)
         import traceback
         traceback.print_exc()
-        return None, "", error_msg
+        yield "", error_msg, None, ""
 
 
 def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
@@ -252,10 +317,63 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
             with gr.Column(scale=1):
                 gr.Markdown("### 📤 Input")
                 
+                # Get list of images from data folder
+                data_folder = "data"
+                if not os.path.exists(data_folder):
+                    data_folder = "."
+                
+                def get_image_list():
+                    """Get list of image files from data folder."""
+                    image_extensions = ['.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG']
+                    image_files = []
+                    if os.path.exists(data_folder):
+                        for file in sorted(os.listdir(data_folder)):
+                            if any(file.endswith(ext) for ext in image_extensions):
+                                full_path = os.path.join(data_folder, file)
+                                image_files.append((file, full_path))
+                    return image_files
+                
+                image_list = get_image_list()
+                # Create mapping from filename to full path
+                image_path_map = {name: path for name, path in image_list}
+                image_choices = [name for name, path in image_list]
+                
+                # Dropdown to select image from data folder
+                image_selector = gr.Dropdown(
+                    choices=image_choices,
+                    label="Select Image from Data Folder",
+                    value=None,  # No default selection - user must choose
+                    interactive=True
+                )
+                
+                # Function to load image from selected filename
+                def load_selected_image(selection):
+                    """Load image from dropdown selection."""
+                    if selection is None or not selection:
+                        return None
+                    try:
+                        # Get full path from mapping
+                        path = image_path_map.get(selection)
+                        if path and os.path.exists(path):
+                            img = Image.open(path).convert('RGB')
+                            return img
+                        return None
+                    except Exception as e:
+                        print(f"Error loading image: {e}")
+                        return None
+                
+                # Image display (loaded from selector)
                 image_input = gr.Image(
                     type="pil",
-                    label="Upload Image",
+                    label="Image Preview",
                     height=400
+                )
+                
+                # When image is selected from dropdown, load it
+                image_selector.change(
+                    fn=load_selected_image,
+                    inputs=image_selector,
+                    outputs=image_input
                 )
                 
                 prompt_input = gr.Textbox(
@@ -292,21 +410,30 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                     interactive=False
                 )
                 
+                # Streaming text output for real-time generation
+                streaming_text_output = gr.Textbox(
+                    label="🔄 Generating Text (Real-time)",
+                    value="",
+                    interactive=False,
+                    lines=15,
+                    max_lines=20
+                )
+                
                 image_output = gr.Image(
                     label="Output Image (with bounding boxes)",
                     height=400
                 )
                 
                 text_output = gr.Markdown(
-                    label="Extracted Text (Markdown)",
+                    label="Final Extracted Text (Markdown)",
                     value="Results will appear here..."
                 )
         
-        # Connect the process button
+        # Connect the process button with streaming
         process_btn.click(
-            fn=process_image_ui,
+            fn=process_image_ui_stream,
             inputs=[image_input, prompt_input, output_dir_input],
-            outputs=[image_output, text_output, status_output]
+            outputs=[streaming_text_output, status_output, image_output, text_output]
         )
         
         # Example section
