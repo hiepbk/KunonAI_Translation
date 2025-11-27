@@ -251,8 +251,10 @@ def main():
     
     
     # prompt_text = cfg.prompt.default
-    prompt_text = cfg.prompt.table_merge_text
+    # prompt_text = cfg.prompt.table_merge_text
     # prompt_text = cfg.prompt.multiple_text
+    # prompt_text = cfg.prompt.only_text
+    prompt_text = cfg.prompt.test1
     
     # Tokenize image
     if '<image>' in prompt_text:
