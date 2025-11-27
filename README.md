@@ -105,9 +105,13 @@ KunonAI_Translation/
 ├── configs/                  # Configuration files
 │   └── deepseek_ocr_image_config.py  # Plain Python config (dicts/variables)
 ├── tools/                    # Inference pipelines and utilities
-│   ├── infer_ocr_image.py    # Main inference pipeline (modular, builder pattern)
+│   ├── inference.py          # Main Gradio UI inference pipeline
 │   ├── utils.py              # Utility functions (load_image, draw_bbox, etc.)
-│   └── run_dpsk_ocr_*.py     # Legacy scripts (for reference)
+│   └── ori_code/             # Original/legacy scripts (for reference)
+│       ├── infer_ocr_image.py
+│       ├── run_dpsk_ocr_pdf.py
+│       ├── run_dpsk_ocr_image.py
+│       └── run_dpsk_ocr_eval_batch.py
 └── weights/                  # Model weights (downloaded automatically)
 ```
 
@@ -156,23 +160,35 @@ print(cfg.model.path)  # Dot notation access
 print(cfg.image.base_size)  # Nested access
 ```
 
-### Using the New Inference Pipeline
+### Using the Inference UI
 
-The new `tools/infer_ocr_image.py` pipeline:
+The main inference interface is a Gradio UI that loads the model once and allows you to change prompts dynamically:
 
 ```bash
 # Basic usage (uses default config)
-python -m tools.infer_ocr_image
+python -m tools.inference
 
 # Custom config file
-python -m tools.infer_ocr_image --config configs/deepseek_ocr_image_config.py
+python -m tools.inference --config configs/deepseek_ocr_image_config.py
 
-# Override config values via command line (mmdet3d-style)
-python -m tools.infer_ocr_image \
+# Custom server settings
+python -m tools.inference \
     --config configs/deepseek_ocr_image_config.py \
-    --cfg-options paths.input=data/test_1.png \
-                   paths.output=results/test_1
+    --server-name 0.0.0.0 \
+    --server-port 7860 \
+    --output-dir results/ui_outputs
+
+# Create a public shareable link
+python -m tools.inference --share
 ```
+
+**Features:**
+- Model loads once at startup (no reloading between prompts)
+- Real-time streaming text generation
+- Image selector dropdown (selects from `data/` folder)
+- Quick prompt buttons for common tasks
+- Visual output with bounding boxes
+- Markdown-formatted extracted text
 
 **Important Notes:**
 - Model weights and tokenizer are automatically downloaded to `cfg.model.path` if not present
@@ -181,45 +197,50 @@ python -m tools.infer_ocr_image \
 
 ## vLLM-Inference
 
-### New Modular Pipeline (Recommended)
+### Gradio UI (Recommended)
 
-The new modular inference pipeline provides a cleaner, more maintainable approach:
+The main inference interface is a Gradio UI that provides an interactive web interface:
 
 ```bash
-# Run inference with default config
-python -m tools.infer_ocr_image
+# Run the UI with default settings
+python -m tools.inference
 
-# Use custom config and override settings
-python -m tools.infer_ocr_image \
+# Custom config and server settings
+python -m tools.inference \
     --config configs/deepseek_ocr_image_config.py \
-    --cfg-options paths.input=data/my_image.png \
-                   image.crop_mode=False
+    --server-name 0.0.0.0 \
+    --server-port 7860
 ```
 
 **Features:**
-- Automatic model download to `weights/DeepSeek-OCR`
-- mmdet3d-like config system with dot notation
-- Command-line argument merging via `--cfg-options`
-- Modular builder functions for easy customization
-- Clean separation of utilities in `tools/utils.py`
+- Model loads once at startup (no reloading between prompts)
+- Real-time streaming text generation
+- Image selector dropdown (selects from `data/` folder)
+- Quick prompt buttons for common tasks
+- Visual output with bounding boxes
+- Markdown-formatted extracted text
 
 ### Legacy Scripts (For Reference)
 
-The original scripts are still available in `tools/` for reference:
+The original scripts are preserved in `tools/ori_code/` for reference:
 
->**Note:** For legacy scripts, change the INPUT_PATH/OUTPUT_PATH and other settings in `configs/deepseek_ocr_image_config.py` or use command-line overrides.
+>**Note:** These scripts use the old config system. For the new UI, use `tools/inference.py` instead.
 
 1. Image: streaming output
 ```Shell
-python tools/run_dpsk_ocr_image.py
+python tools/ori_code/run_dpsk_ocr_image.py
 ```
 2. PDF: concurrency ~2500tokens/s(an A100-40G)
 ```Shell
-python tools/run_dpsk_ocr_pdf.py
+python tools/ori_code/run_dpsk_ocr_pdf.py
 ```
 3. Batch eval for benchmarks
 ```Shell
-python tools/run_dpsk_ocr_eval_batch.py
+python tools/ori_code/run_dpsk_ocr_eval_batch.py
+```
+4. Command-line inference (old version)
+```Shell
+python tools/ori_code/infer_ocr_image.py
 ```
 
 **[2025/10/23] The version of upstream [vLLM](https://docs.vllm.ai/projects/recipes/en/latest/DeepSeek/DeepSeek-OCR.html#installing-vllm):**
