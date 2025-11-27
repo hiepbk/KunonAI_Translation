@@ -48,6 +48,10 @@ _processor: Optional[DeepseekOCRProcessor] = None
 _sampling_params: Optional[SamplingParams] = None
 _cfg: Optional[Config] = None
 
+# Thread-safe cancellation support
+_current_request_id: Optional[str] = None
+_cancel_lock = threading.Lock()
+
 
 def build_engine(cfg) -> AsyncLLMEngine:
     """Build vLLM async engine."""
@@ -117,9 +121,8 @@ async def generate_text(engine: AsyncLLMEngine, sampling_params: SamplingParams,
 
 
 async def generate_text_stream(engine: AsyncLLMEngine, sampling_params: SamplingParams, 
-                                image_features, prompt: str):
+                                image_features, prompt: str, request_id: str):
     """Generate text with streaming - yields text incrementally."""
-    request_id = f"request-{int(time.time())}"
     printed_length = 0
     
     if image_features and '<image>' in prompt:
@@ -134,13 +137,23 @@ async def generate_text_stream(engine: AsyncLLMEngine, sampling_params: Sampling
     else:
         raise ValueError("Prompt is required")
     
-    async for request_output in engine.generate(request, sampling_params, request_id):
-        if request_output.outputs:
-            full_text = request_output.outputs[0].text
-            new_text = full_text[printed_length:]
-            if new_text:  # Only yield if there's new text
-                printed_length = len(full_text)
-                yield new_text
+    try:
+        async for request_output in engine.generate(request, sampling_params, request_id):
+            # Check if request was cancelled
+            with _cancel_lock:
+                if _current_request_id != request_id:
+                    # Request was cancelled, stop generating
+                    break
+            
+            if request_output.outputs:
+                full_text = request_output.outputs[0].text
+                new_text = full_text[printed_length:]
+                if new_text:  # Only yield if there's new text
+                    printed_length = len(full_text)
+                    yield new_text
+    except asyncio.CancelledError:
+        # Handle cancellation gracefully
+        pass
 
 
 def initialize_model(config_path: str):
@@ -184,7 +197,7 @@ def process_image_ui_stream(image: Image.Image, prompt: str, output_dir: str):
     Process image with streaming text output.
     Yields: (streaming_text, status, output_image, final_markdown)
     """
-    global _engine, _processor, _sampling_params, _cfg
+    global _engine, _processor, _sampling_params, _cfg, _current_request_id
     
     if _engine is None or _processor is None:
         yield "", "Error: Model not initialized. Please restart the application.", None, ""
@@ -219,22 +232,35 @@ def process_image_ui_stream(image: Image.Image, prompt: str, output_dir: str):
                 cropping=_cfg.image.crop_mode
             )
         
+        # Generate unique request ID and store it
+        request_id = f"request-{int(time.time() * 1000000)}"  # Use microseconds for uniqueness
+        with _cancel_lock:
+            _current_request_id = request_id
+        
         # Run streaming inference
-        print(f"Running inference with prompt: {prompt[:50]}...")
+        print(f"Running inference with prompt: {prompt[:50]}... (request_id: {request_id})")
         accumulated_text = ""
         
         # Use a queue to bridge async generator to sync generator
         text_queue = queue.Queue()
         done = threading.Event()
+        cancelled = threading.Event()
         
         async def stream_async():
             """Run async stream and put chunks in queue."""
             try:
-                async for chunk in generate_text_stream(_engine, _sampling_params, image_features, prompt):
+                async for chunk in generate_text_stream(_engine, _sampling_params, image_features, prompt, request_id):
+                    # Check if cancelled
+                    with _cancel_lock:
+                        if _current_request_id != request_id:
+                            cancelled.set()
+                            break
                     text_queue.put(chunk)
-                text_queue.put(None)  # Signal done
+                if not cancelled.is_set():
+                    text_queue.put(None)  # Signal done
             except Exception as e:
-                text_queue.put(None)
+                if not cancelled.is_set():
+                    text_queue.put(None)
                 raise e
         
         # Start async stream in background
@@ -247,6 +273,16 @@ def process_image_ui_stream(image: Image.Image, prompt: str, output_dir: str):
         
         # Yield chunks as they arrive
         while not done.is_set() or not text_queue.empty():
+            # Check if cancelled (check both the event and the request_id)
+            if cancelled.is_set():
+                break
+            
+            # Also check if request_id was cleared (cancelled externally)
+            with _cancel_lock:
+                if _current_request_id != request_id:
+                    cancelled.set()
+                    break
+                
             try:
                 chunk = text_queue.get(timeout=0.1)
                 if chunk is None:
@@ -255,6 +291,22 @@ def process_image_ui_stream(image: Image.Image, prompt: str, output_dir: str):
                 yield accumulated_text, "🔄 Generating...", None, ""
             except queue.Empty:
                 continue
+        
+        # Check if cancelled
+        if cancelled.is_set():
+            # Clean up: abort the request in the engine
+            try:
+                _engine.abort(request_id)
+            except Exception as e:
+                print(f"Error aborting request: {e}")
+            
+            # Clear the request ID
+            with _cancel_lock:
+                if _current_request_id == request_id:
+                    _current_request_id = None
+            
+            yield accumulated_text, "⚠️ Cancelled by user", None, ""
+            return
         
         result_text = accumulated_text
         
@@ -281,6 +333,12 @@ def process_image_ui_stream(image: Image.Image, prompt: str, output_dir: str):
             markdown_content = result_text
         
         status = f"✓ Success! Results saved to: {output_path}"
+        
+        # Clear request ID after successful completion
+        with _cancel_lock:
+            if _current_request_id == request_id:
+                _current_request_id = None
+        
         yield result_text, status, output_image, markdown_content
         
     except Exception as e:
@@ -288,6 +346,12 @@ def process_image_ui_stream(image: Image.Image, prompt: str, output_dir: str):
         print(error_msg)
         import traceback
         traceback.print_exc()
+        
+        # Clear request ID on error
+        with _cancel_lock:
+            if _current_request_id == request_id:
+                _current_request_id = None
+        
         yield "", error_msg, None, ""
 
 
@@ -393,7 +457,9 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                     lines=1
                 )
                 
-                process_btn = gr.Button("🚀 Process Image", variant="primary", size="lg")
+                with gr.Row():
+                    process_btn = gr.Button("🚀 Process Image", variant="primary", size="lg", scale=3)
+                    cancel_btn = gr.Button("❌ Cancel", variant="stop", size="lg", scale=1)
                 
             with gr.Column(scale=1):
                 gr.Markdown("### 📊 Output")
@@ -424,10 +490,41 @@ def create_ui(config_path: str, default_output_dir: str = "results/ui_outputs"):
                 )
         
         # Connect the process button with streaming
-        process_btn.click(
+        process_event = process_btn.click(
             fn=process_image_ui_stream,
             inputs=[image_input, prompt_input, output_dir_input],
             outputs=[streaming_text_output, status_output, image_output, text_output]
+        )
+        
+        # Cancel function
+        def cancel_inference():
+            """Cancel the current inference request."""
+            global _current_request_id, _engine
+            
+            with _cancel_lock:
+                if _current_request_id is not None and _engine is not None:
+                    try:
+                        print(f"Cancelling request: {_current_request_id}")
+                        _engine.abort(_current_request_id)
+                        _current_request_id = None
+                        return "⚠️ Cancellation requested..."
+                    except Exception as e:
+                        print(f"Error cancelling request: {e}")
+                        return f"Error cancelling: {str(e)}"
+                else:
+                    return "No active request to cancel"
+        
+        # Connect cancel button
+        cancel_btn.click(
+            fn=cancel_inference,
+            inputs=[],
+            outputs=[status_output]
+        )
+        
+        # Also cancel when cancel button is clicked (stop the process event)
+        cancel_btn.click(
+            fn=None,
+            cancels=[process_event]
         )
         
         # Example section
